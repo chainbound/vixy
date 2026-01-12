@@ -30,6 +30,41 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 6: CL Health Check (TDD Complete)
+
+**What I did:**
+- **Tests**: Wrote 13 unit tests in src/health/cl.rs:
+  - check_cl_health tests (3 tests): returns true on 200, false on 503, false on connection failure
+  - check_cl_slot tests (2 tests): parses JSON response, fails on invalid JSON
+  - calculate_cl_health tests (5 tests): lag calc, unhealthy when health fails, unhealthy when lagging, healthy when both pass, exact max lag
+  - update_cl_chain_head tests (3 tests): finds max slot, single node, empty returns zero
+- Created BDD feature file tests/features/cl_health.feature
+
+- **Implementation**:
+  - BeaconHeaderResponse struct for parsing /eth/v1/beacon/headers/head
+  - check_cl_health() - GET /eth/v1/node/health, return true on 2xx
+  - check_cl_slot() - GET /eth/v1/beacon/headers/head, parse slot from JSON
+  - check_cl_node() - combines health and slot checks
+  - update_cl_chain_head() - find max slot across nodes
+  - calculate_cl_health() - set lag and is_healthy (requires health_ok AND lag <= max_lag)
+
+**Challenges faced:**
+- CL health has two conditions: health endpoint must return 200 AND node must be within lag threshold
+- Unlike EL which just uses block number, CL has both health endpoint AND headers endpoint
+
+**How I solved it:**
+- is_healthy = health_ok && lag <= max_lag
+- This means a CL node is unhealthy if either:
+  1. The health endpoint doesn't return 200, OR
+  2. The node is lagging behind chain head
+
+**What I learned:**
+- Beacon API uses different endpoints than EL JSON-RPC
+- Slot numbers are strings in JSON (not hex like EL block numbers)
+- CL health is more stringent - both conditions must pass
+
+**Mood:** Efficient - CL pattern was similar to EL, fast implementation!
+
 ### 2026-01-12 - Phase 5: EL Health Check (TDD Complete)
 
 **What I did:**
