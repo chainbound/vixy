@@ -27,8 +27,8 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
 | 9 | Main Entry Point | Completed |
 | 10 | Metrics | Completed |
 | 11 | Final Verification | Completed |
-| 12 | Enhancements (Optional) | Not Started |
-| 13 | Write the Story | Not Started |
+| 12 | Enhancements (Optional) | Completed |
+| 13 | Write the Story | Completed |
 
 ## Quick Start
 

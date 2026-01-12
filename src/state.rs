@@ -92,6 +92,10 @@ pub struct AppState {
     pub max_el_lag: u64,
     /// Maximum allowed CL lag in slots
     pub max_cl_lag: u64,
+    /// Proxy request timeout in milliseconds
+    pub proxy_timeout_ms: u64,
+    /// Maximum number of retry attempts
+    pub max_retries: u32,
 }
 
 impl AppState {
@@ -121,6 +125,8 @@ impl AppState {
             el_failover_active: AtomicBool::new(false),
             max_el_lag: config.global.max_el_lag_blocks,
             max_cl_lag: config.global.max_cl_lag_slots,
+            proxy_timeout_ms: config.global.proxy_timeout_ms,
+            max_retries: config.global.max_retries,
         }
     }
 }

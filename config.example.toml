@@ -11,6 +11,12 @@ max_cl_lag_slots = 3
 # How often to check node health (in milliseconds)
 health_check_interval_ms = 1000
 
+# Timeout for proxy requests (in milliseconds)
+proxy_timeout_ms = 30000
+
+# Maximum number of retry attempts for failed proxy requests
+max_retries = 2
+
 [el]
 # Primary EL nodes - used by default
 [[el.primary]]

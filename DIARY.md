@@ -30,6 +30,54 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 13: Write the Story
+
+**What I did:**
+- Created BLOG.md - a comprehensive blog post about building Vixy with AI assistance
+- Documented the TDD/BDD approach with concrete examples
+- Highlighted the challenges faced and how they were resolved
+- Provided the final statistics and achievements
+- Added lessons learned for future AI-assisted development projects
+
+**Highlights:**
+- 72 unit tests, 16 BDD scenarios, 83 steps - all passing
+- ~2,500 lines of Rust code
+- 8+ hours of development time
+- Full test coverage with TDD methodology
+
+**What I learned:**
+- Documentation is essential for telling the story
+- DIARY.md was invaluable for reconstructing the journey
+- Good specifications (AGENT.md) enable autonomous AI development
+
+**Mood:** Reflective - looking back at what we built is satisfying!
+
+### 2026-01-12 - Phase 12: Enhancements
+
+**What I did:**
+- Added `/status` endpoint that returns JSON with all node health states:
+  - EL chain head, CL chain head, failover status
+  - All EL nodes with block number, lag, health status
+  - All CL nodes with slot, lag, health status
+- Added configurable proxy timeout (`proxy_timeout_ms`)
+- Added configurable max retries (`max_retries`)
+- Updated config.example.toml with new settings
+- Implemented BDD step definitions for all 10 previously skipped health scenarios
+- All 16 BDD scenarios now pass (was 6 passing, 10 skipped)
+
+**Technical details:**
+- StatusResponse struct with Serialize for JSON output
+- New Global config fields with sensible defaults (30s timeout, 2 retries)
+- Updated AppState to include new configuration values
+- ElNodeStatus and ClNodeStatus structs for clean JSON serialization
+
+**What I learned:**
+- axum's Json extractor makes JSON responses trivial
+- Adding new config fields requires updating all test helpers that create AppState manually
+- BDD tests provide confidence that the system works end-to-end
+
+**Mood:** Productive - nice quality-of-life improvements!
+
 ### 2026-01-12 - Phase 11: Final Verification
 
 **What I did:**

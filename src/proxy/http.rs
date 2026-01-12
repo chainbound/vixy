@@ -4,6 +4,8 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
+use serde::Serialize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -173,6 +175,93 @@ async fn convert_response(response: reqwest::Response) -> Response {
     }
 }
 
+// ============================================================================
+// Status endpoint
+// ============================================================================
+
+/// EL node status for JSON response
+#[derive(Debug, Serialize)]
+pub struct ElNodeStatus {
+    pub name: String,
+    pub http_url: String,
+    pub is_primary: bool,
+    pub block_number: u64,
+    pub lag: u64,
+    pub check_ok: bool,
+    pub is_healthy: bool,
+}
+
+/// CL node status for JSON response
+#[derive(Debug, Serialize)]
+pub struct ClNodeStatus {
+    pub name: String,
+    pub url: String,
+    pub slot: u64,
+    pub lag: u64,
+    pub health_ok: bool,
+    pub is_healthy: bool,
+}
+
+/// Full status response
+#[derive(Debug, Serialize)]
+pub struct StatusResponse {
+    pub el_chain_head: u64,
+    pub cl_chain_head: u64,
+    pub el_failover_active: bool,
+    pub el_nodes: Vec<ElNodeStatus>,
+    pub cl_nodes: Vec<ClNodeStatus>,
+}
+
+/// Handle status requests (GET /status)
+///
+/// Returns JSON with all node health states
+pub async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusResponse> {
+    let el_chain_head = state.el_chain_head.load(Ordering::SeqCst);
+    let cl_chain_head = state.cl_chain_head.load(Ordering::SeqCst);
+    let el_failover_active = state.el_failover_active.load(Ordering::SeqCst);
+
+    // Collect EL node statuses
+    let el_nodes = {
+        let nodes = state.el_nodes.read().await;
+        nodes
+            .iter()
+            .map(|n| ElNodeStatus {
+                name: n.name.clone(),
+                http_url: n.http_url.clone(),
+                is_primary: n.is_primary,
+                block_number: n.block_number,
+                lag: n.lag,
+                check_ok: n.check_ok,
+                is_healthy: n.is_healthy,
+            })
+            .collect()
+    };
+
+    // Collect CL node statuses
+    let cl_nodes = {
+        let nodes = state.cl_nodes.read().await;
+        nodes
+            .iter()
+            .map(|n| ClNodeStatus {
+                name: n.name.clone(),
+                url: n.url.clone(),
+                slot: n.slot,
+                lag: n.lag,
+                health_ok: n.health_ok,
+                is_healthy: n.is_healthy,
+            })
+            .collect()
+    };
+
+    Json(StatusResponse {
+        el_chain_head,
+        cl_chain_head,
+        el_failover_active,
+        el_nodes,
+        cl_nodes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,6 +285,8 @@ mod tests {
             el_failover_active: std::sync::atomic::AtomicBool::new(false),
             max_el_lag: 5,
             max_cl_lag: 3,
+            proxy_timeout_ms: 30000,
+            max_retries: 2,
         })
     }
 

@@ -197,6 +197,8 @@ mod tests {
             el_failover_active: std::sync::atomic::AtomicBool::new(false),
             max_el_lag: 5,
             max_cl_lag: 3,
+            proxy_timeout_ms: 30000,
+            max_retries: 2,
         })
     }
 

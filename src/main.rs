@@ -85,6 +85,8 @@ async fn main() -> eyre::Result<()> {
         .route("/cl/{*path}", axum::routing::any(http::cl_proxy_handler))
         // Health endpoint for the proxy itself
         .route("/health", axum::routing::get(|| async { "OK" }))
+        // Status endpoint - JSON view of all node states
+        .route("/status", axum::routing::get(http::status_handler))
         // Metrics endpoint for Prometheus
         .route(
             "/metrics",
