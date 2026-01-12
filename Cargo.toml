@@ -49,6 +49,7 @@ wiremock = "0.6"
 
 # Async test utilities
 tokio-test = "0.4"
+futures = "0.3"
 
 [[test]]
 name = "cucumber"

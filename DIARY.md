@@ -30,6 +30,33 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 2: BDD Infrastructure Setup
+
+**What I did:**
+- Enhanced tests/cucumber.rs with proper test harness using futures executor
+- Created tests/world.rs with VixyWorld struct containing:
+  - config: Option<Config> for configuration testing
+  - el_nodes/cl_nodes: Vec for node state testing
+  - mock_servers: Vec<MockServer> for wiremock integration
+  - selected_node, last_response, last_error for step assertions
+- Added futures = "0.3" to dev-dependencies (needed for cucumber)
+- Verified BDD infrastructure works with `cargo test --test cucumber`
+
+**Challenges faced:**
+- Initial cucumber test failed because `futures` crate wasn't in dev-dependencies
+- The main dependencies don't automatically get included in test targets
+
+**How I solved it:**
+- Added `futures = "0.3"` to dev-dependencies section
+- Tests now run successfully (0 features, 0 scenarios - as expected before we add feature files)
+
+**What I learned:**
+- Cucumber-rs uses a World struct to maintain state across steps
+- The #[derive(World)] macro handles the cucumber integration
+- Feature files will be added in Phase 3+ as we implement each component
+
+**Mood:** Satisfied - BDD infrastructure is ready for test-first development!
+
 ### 2026-01-12 - Phase 1: Project Setup
 
 **What I did:**

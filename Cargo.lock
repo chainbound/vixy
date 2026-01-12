@@ -2752,6 +2752,7 @@ dependencies = [
  "clap",
  "cucumber",
  "eyre",
+ "futures",
  "futures-util",
  "prometric",
  "reqwest",
