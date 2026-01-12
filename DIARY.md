@@ -30,6 +30,40 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 9: Main Entry Point
+
+**What I did:**
+- Implemented main.rs with full application lifecycle:
+  - CLI argument parsing with clap (--config, --listen)
+  - Tracing initialization with env-filter support
+  - Configuration loading and validation
+  - AppState initialization
+  - Health monitor spawning as background task
+  - axum router setup with all routes
+  - Graceful shutdown handling (Ctrl+C, SIGTERM)
+
+- Routes configured:
+  - POST /el -> EL HTTP proxy
+  - GET /el/ws -> EL WebSocket proxy
+  - GET/POST/ANY /cl/{*path} -> CL HTTP proxy
+  - GET /health -> Health check endpoint
+
+- Created config.example.toml with documented settings
+
+**Challenges faced:**
+- None significant - all components were ready from previous phases
+
+**How I solved it:**
+- Composed all the pieces from lib modules into a clean main entry point
+- Used tokio::select! for clean shutdown signal handling
+
+**What I learned:**
+- axum::serve() with graceful_shutdown provides clean server lifecycle
+- clap derive macros make CLI argument parsing very ergonomic
+- Background tasks with tokio::spawn run independently of main server
+
+**Mood:** Satisfying - the application is runnable!
+
 ### 2026-01-12 - Phase 8: Proxy Server (TDD Complete)
 
 **What I did:**
