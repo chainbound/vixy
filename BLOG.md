@@ -228,6 +228,78 @@ Humans (or human-AI collaboration) handled:
 
 ---
 
+## Integration Testing with Kurtosis
+
+Unit tests and BDD scenarios are great, but they test against mocks. To truly verify Vixy works, we needed real Ethereum nodes.
+
+### Enter Kurtosis
+
+[Kurtosis](https://kurtosis.com/) is a platform for packaging and launching ephemeral backend stacks. With their [ethereum-package](https://github.com/ethpandaops/ethereum-package), we can spin up a complete Ethereum testnet in minutes.
+
+Our test setup:
+- **4 EL nodes** (geth) - 2 primary, 2 backup
+- **4 CL nodes** (lighthouse) - for consensus
+- **Minimal preset** - fast block times (2s) for quick testing
+
+```yaml
+# kurtosis/network_params.yaml
+participants:
+  - el_type: geth
+    cl_type: lighthouse
+    count: 4
+
+network_params:
+  preset: minimal
+  seconds_per_slot: 2
+```
+
+### 15 Integration Scenarios
+
+```bash
+just integration-test
+```
+
+This command:
+1. Starts a Kurtosis enclave with 4 EL/CL pairs
+2. Auto-detects node endpoints and generates Vixy config
+3. Starts Vixy with the generated config
+4. Runs 15 cucumber scenarios against real nodes
+5. Cleans up
+
+**Test coverage:**
+- CL proxy forwarding (health, headers, syncing)
+- EL proxy forwarding (eth_blockNumber, eth_chainId, batches)
+- Single-node failover (stop el-1, verify el-2 handles requests)
+- **Full backup failover** (stop ALL primaries, verify backups take over)
+- Health monitoring (status endpoint, node detection, recovery)
+- Prometheus metrics
+
+### The Backup Failover Test
+
+This is the test that proves Vixy's value:
+
+```gherkin
+Scenario: Proxy uses backup when all primary nodes are down
+  Given all primary EL nodes are stopped
+  When I send an eth_blockNumber request to Vixy
+  Then I should receive a valid block number response
+  And the response should be from a backup node
+```
+
+When we stop el-1 and el-2 (both primaries), Vixy automatically routes to el-3 or el-4 (backups). No manual intervention. No downtime.
+
+### Bugs Found by Integration Tests
+
+Integration tests caught bugs that unit tests missed:
+
+1. **Missing Content-Type header** - The proxy wasn't forwarding the Content-Type header, causing geth to return HTTP 415. Unit tests with mocks didn't catch this.
+
+2. **Beacon node 206 responses** - Lighthouse returns HTTP 206 when syncing, which our tests incorrectly flagged as failure.
+
+Both were fixed before they could impact production.
+
+---
+
 ## The Future
 
 Vixy is functional, but there's always more to do:

@@ -30,6 +30,43 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-13 - Phase 14: Kurtosis Integration Testing
+
+**What I did:**
+- Removed Docker Compose testing setup in favor of Kurtosis (better for Ethereum testnets)
+- Created comprehensive Kurtosis integration test infrastructure:
+  - `kurtosis/network_params.yaml` - 4-node Ethereum testnet (2 primary + 2 backup EL)
+  - `scripts/setup-kurtosis.sh` - Auto-detects nodes and generates Vixy config
+  - 15 integration test scenarios using real Ethereum nodes
+- Added justfile commands: `kurtosis-up`, `kurtosis-down`, `kurtosis-vixy`, `integration-test`
+- Fixed HTTP proxy to forward Content-Type header (was causing 415 errors)
+- Implemented backup failover test - verifies requests work when ALL primaries are down
+
+**Test Scenarios (15 total):**
+- CL Proxy: health, beacon headers, syncing, failover
+- EL Proxy: eth_blockNumber, eth_chainId, batch requests, failover, backup failover, WebSocket
+- Health Monitoring: status endpoint, node detection, node recovery, lag calculation, Prometheus metrics
+
+**Challenges faced:**
+- Kurtosis API changed - `public_port_start` was deprecated
+- Nodes take time to sync after restart - tests needed polling instead of fixed waits
+- HTTP 415 errors - geth requires Content-Type header that proxy wasn't forwarding
+- HTTP 206 (Partial Content) - Lighthouse returns this when syncing, not just 200
+
+**How I solved it:**
+- Updated `port_publisher` config to use `el.enabled` and `cl.enabled`
+- Added polling in test steps that waits until nodes report healthy
+- Fixed proxy to extract and forward Content-Type header from original request
+- Updated test assertions to accept any 2xx status code
+
+**What I learned:**
+- Kurtosis is excellent for spinning up real Ethereum testnets
+- Integration tests against real infrastructure catch bugs unit tests miss
+- The ethereum-package supports many EL/CL client combinations
+- Node sync times vary - tests need to be resilient to timing
+
+**Mood:** Accomplished - real integration tests give confidence the proxy actually works!
+
 ### 2026-01-12 - Phase 13: Write the Story
 
 **What I did:**

@@ -53,4 +53,56 @@ just test-bdd     # Run BDD tests (cucumber)
 just ci           # Run full CI checks
 ```
 
+## Integration Testing with Kurtosis
+
+Vixy includes comprehensive integration tests that run against a real Ethereum testnet using [Kurtosis](https://docs.kurtosis.com/).
+
+### Prerequisites
+
+- [Kurtosis CLI](https://docs.kurtosis.com/install/) installed
+- Docker running
+
+### Running Integration Tests
+
+```bash
+# Run all integration tests (starts Kurtosis, runs tests, stops Vixy)
+just integration-test
+
+# Or step by step:
+just kurtosis-up      # Start 4-node Ethereum testnet
+just kurtosis-vixy    # Start Vixy with auto-detected config
+just kurtosis-test    # Run integration tests
+just kurtosis-down    # Stop testnet
+```
+
+### Test Coverage (15 scenarios)
+
+**CL Proxy:**
+- Forwards node health requests
+- Forwards beacon headers requests
+- Forwards node syncing requests
+- Fails over when primary CL node is down
+
+**EL Proxy:**
+- Forwards eth_blockNumber requests
+- Forwards eth_chainId requests
+- Handles batch requests
+- Fails over when primary node is down
+- Uses backup when ALL primary nodes are down
+- WebSocket proxy connects and forwards messages
+
+**Health Monitoring:**
+- Status endpoint returns all node states
+- Health monitor detects node going down
+- Health monitor detects node recovering
+- Health monitor calculates correct lag
+- Prometheus metrics are exposed
+
+### Testnet Configuration
+
+The testnet runs with:
+- 4 EL nodes (geth): el-1, el-2 as primary; el-3, el-4 as backup
+- 4 CL nodes (lighthouse): cl-1, cl-2, cl-3, cl-4
+- Minimal preset with 2-second slot times
+
 See [AGENT.md](./AGENT.md) for detailed implementation plan and architecture.

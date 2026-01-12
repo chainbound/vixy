@@ -498,7 +498,7 @@ Failover logic:
 - [ ] Add CL WebSocket support (CL events API)
 
 ### Phase 13: Write the Story
-- [ ] Create `BLOG.md` - a blog post telling the story of building Vixy with an AI Agent
+- [x] Create `BLOG.md` - a blog post telling the story of building Vixy with an AI Agent
   - Use `DIARY.md` as the primary resource for content
   - Highlight the engineering practices applied:
     - TDD (Test-Driven Development) - tests first, then implementation
@@ -510,6 +510,42 @@ Failover logic:
   - Include specific examples of challenges overcome (from DIARY.md)
   - Reflect on what worked well and what could be improved
   - Make it engaging - this is a story, not just a technical report
+
+### Phase 14: Integration Testing with Kurtosis
+- [x] Set up Kurtosis integration test infrastructure:
+  - [x] Create `kurtosis/network_params.yaml` - 4-node Ethereum testnet config
+  - [x] Create `scripts/setup-kurtosis.sh` - Auto-detects nodes, generates Vixy config
+  - [x] Add justfile commands: `kurtosis-up`, `kurtosis-down`, `kurtosis-vixy`, `integration-test`
+- [x] Create integration test scenarios (`tests/features/integration/`):
+  - [x] `cl_proxy.feature` - CL proxy forwarding and failover (4 scenarios)
+  - [x] `el_proxy.feature` - EL proxy forwarding, failover, backup failover, WebSocket (6 scenarios)
+  - [x] `health_monitoring.feature` - Status, detection, recovery, lag, metrics (5 scenarios)
+- [x] Implement integration step definitions (`tests/steps/integration_steps.rs`):
+  - [x] Kurtosis service start/stop helpers
+  - [x] HTTP request steps for EL JSON-RPC and CL Beacon API
+  - [x] Health polling and status verification
+  - [x] Backup failover test (stop ALL primaries, verify backups work)
+- [x] Fix bugs found by integration tests:
+  - [x] HTTP proxy Content-Type header forwarding
+  - [x] Accept 2xx status codes (Lighthouse returns 206 when syncing)
+
+**Test Configuration:**
+```yaml
+# 4-node testnet: 2 primary + 2 backup EL nodes
+participants:
+  - el_type: geth
+    cl_type: lighthouse
+    count: 4
+
+network_params:
+  preset: minimal
+  seconds_per_slot: 2
+```
+
+**Running Integration Tests:**
+```bash
+just integration-test  # Full cycle: setup, test, cleanup
+```
 
 ---
 
