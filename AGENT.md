@@ -132,6 +132,8 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 > Phase 1: Setup → Phase 2: Write Tests (RED) → Phase 3-10: Implement (GREEN) → Refactor
 > ```
 
+> **IMPORTANT**: After completing each phase, update the Progress table in `README.md` to reflect the current status (Not Started → In Progress → Completed).
+
 ### Phase 1: Project Setup
 - [ ] Fix Cargo.toml edition from "2024" to "2021"
 - [ ] Add dependencies to Cargo.toml:
