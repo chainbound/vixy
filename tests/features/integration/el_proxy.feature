@@ -30,6 +30,13 @@ Feature: EL Proxy Integration Tests
     Then I should receive a valid block number response
     And the response should be from the secondary node
 
+  @integration @el @failover @backup
+  Scenario: Proxy uses backup when all primary nodes are down
+    Given all primary EL nodes are stopped
+    When I send an eth_blockNumber request to Vixy
+    Then I should receive a valid block number response
+    And the response should be from a backup node
+
   @integration @el @websocket
   Scenario: WebSocket proxy connects and forwards messages
     When I connect to the EL WebSocket endpoint

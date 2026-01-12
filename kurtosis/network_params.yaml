@@ -1,20 +1,16 @@
 # Kurtosis Ethereum Package Configuration for Vixy Integration Tests
-# Minimal config with 2 nodes for faster startup and lower resource usage
+# 4 nodes for comprehensive failover testing (2 primary + 2 backup)
 #
 # Usage:
 #   kurtosis run github.com/ethpandaops/ethereum-package --args-file network_params.yaml
 
-# Network participants - 2 EL/CL pairs for basic failover testing
+# Network participants - 4 EL/CL pairs for failover testing
+# el-1, el-2 = primary nodes
+# el-3, el-4 = backup nodes
 participants:
-  # Primary EL/CL pair (geth + lighthouse)
   - el_type: geth
     cl_type: lighthouse
-    count: 1
-
-  # Secondary EL/CL pair (geth + lighthouse) - for failover testing
-  - el_type: geth
-    cl_type: lighthouse
-    count: 1
+    count: 4
 
 # Network configuration
 network_params:

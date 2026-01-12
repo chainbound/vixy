@@ -79,7 +79,8 @@ if kurtosis enclave inspect "$ENCLAVE_NAME" &> /dev/null; then
     echo_info "Enclave '$ENCLAVE_NAME' already exists."
     echo_info "Ensuring all services are running..."
     # Start all known services (in case some were stopped by previous tests)
-    for service in el-1-geth-lighthouse el-2-geth-lighthouse cl-1-lighthouse-geth cl-2-lighthouse-geth; do
+    for service in el-1-geth-lighthouse el-2-geth-lighthouse el-3-geth-lighthouse el-4-geth-lighthouse \
+                   cl-1-lighthouse-geth cl-2-lighthouse-geth cl-3-lighthouse-geth cl-4-lighthouse-geth; do
         kurtosis service start "$ENCLAVE_NAME" "$service" 2>/dev/null || true
     done
     # Wait for services to come up
@@ -130,9 +131,11 @@ port = 9090
 HEADER
 
 # Extract EL nodes using kurtosis port print
+# First 2 nodes are primary, rest are backup
 EL_COUNT=0
-FIRST_EL=true
-for i in 1 2 3; do
+PRIMARY_HEADER_WRITTEN=false
+BACKUP_HEADER_WRITTEN=false
+for i in 1 2 3 4; do
     # Try different EL service naming patterns
     for pattern in "el-$i-geth-lighthouse" "el-$i-geth-prysm" "el-$i-nethermind-teku" "el-$i-geth" "el-$i"; do
         HTTP_PORT=$(kurtosis port print "$ENCLAVE_NAME" "$pattern" rpc 2>/dev/null || true)
@@ -144,9 +147,12 @@ for i in 1 2 3; do
             # Default WS to HTTP port if not available
             [[ -z "$WS_PORT" ]] && WS_PORT="${HTTP_PORT%:*}:${HTTP_PORT##*:}"
 
-            # First node is primary, rest are backup
-            if [[ "$FIRST_EL" == "true" ]]; then
-                echo "# Primary EL nodes" >> "$CONFIG_FILE"
+            # First 2 nodes are primary, rest are backup
+            if [[ $i -le 2 ]]; then
+                if [[ "$PRIMARY_HEADER_WRITTEN" == "false" ]]; then
+                    echo "# Primary EL nodes" >> "$CONFIG_FILE"
+                    PRIMARY_HEADER_WRITTEN=true
+                fi
                 cat >> "$CONFIG_FILE" << EOF
 [[el.primary]]
 name = "$pattern"
@@ -154,11 +160,10 @@ http_url = "http://$HTTP_PORT"
 ws_url = "ws://$WS_PORT"
 
 EOF
-                FIRST_EL=false
             else
-                # Add backup section header only once
-                if [[ $EL_COUNT -eq 2 ]]; then
+                if [[ "$BACKUP_HEADER_WRITTEN" == "false" ]]; then
                     echo "# Backup EL nodes" >> "$CONFIG_FILE"
+                    BACKUP_HEADER_WRITTEN=true
                 fi
                 cat >> "$CONFIG_FILE" << EOF
 [[el.backup]]
@@ -178,7 +183,7 @@ done
 echo "# CL nodes" >> "$CONFIG_FILE"
 
 CL_COUNT=0
-for i in 1 2 3; do
+for i in 1 2 3 4; do
     # Try different CL service naming patterns
     for pattern in "cl-$i-lighthouse-geth" "cl-$i-prysm-geth" "cl-$i-teku-nethermind" "cl-$i-lighthouse" "cl-$i"; do
         HTTP_PORT=$(kurtosis port print "$ENCLAVE_NAME" "$pattern" http 2>/dev/null || true)

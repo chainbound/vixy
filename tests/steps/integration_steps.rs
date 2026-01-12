@@ -615,8 +615,20 @@ async fn get_primary_cl_service(world: &IntegrationWorld) -> Option<String> {
 }
 
 /// Known service names in our Kurtosis testnet
-const EL_SERVICES: &[&str] = &["el-1-geth-lighthouse", "el-2-geth-lighthouse"];
-const CL_SERVICES: &[&str] = &["cl-1-lighthouse-geth", "cl-2-lighthouse-geth"];
+/// el-1, el-2 are primary; el-3, el-4 are backup
+const EL_SERVICES: &[&str] = &[
+    "el-1-geth-lighthouse",
+    "el-2-geth-lighthouse",
+    "el-3-geth-lighthouse",
+    "el-4-geth-lighthouse",
+];
+const EL_PRIMARY_SERVICES: &[&str] = &["el-1-geth-lighthouse", "el-2-geth-lighthouse"];
+const CL_SERVICES: &[&str] = &[
+    "cl-1-lighthouse-geth",
+    "cl-2-lighthouse-geth",
+    "cl-3-lighthouse-geth",
+    "cl-4-lighthouse-geth",
+];
 
 #[given("all Kurtosis services are running")]
 async fn ensure_all_services_running(world: &mut IntegrationWorld) {
@@ -698,6 +710,21 @@ async fn primary_el_was_stopped(world: &mut IntegrationWorld) {
     }
 }
 
+#[given("all primary EL nodes are stopped")]
+async fn stop_all_primary_el_nodes(world: &mut IntegrationWorld) {
+    // Stop all primary EL services (el-1 and el-2)
+    for service in EL_PRIMARY_SERVICES {
+        if kurtosis_stop_service(service).await {
+            world.stopped_containers.push(service.to_string());
+            eprintln!("Stopped primary EL node: {}", service);
+        } else {
+            eprintln!("Warning: Failed to stop EL service: {}", service);
+        }
+    }
+    // Wait for Vixy to detect all nodes are down and activate failover
+    tokio::time::sleep(Duration::from_secs(8)).await;
+}
+
 #[when("the primary EL node is restarted")]
 async fn restart_primary_el_node(world: &mut IntegrationWorld) {
     // Restart all stopped EL services
@@ -727,6 +754,17 @@ async fn verify_from_secondary(world: &mut IntegrationWorld) {
         world.last_status_code,
         Some(200),
         "Expected successful response from secondary node"
+    );
+}
+
+#[then("the response should be from a backup node")]
+async fn verify_from_backup(world: &mut IntegrationWorld) {
+    // Verify we got a successful response (meaning backup failover worked)
+    // All primaries are down, so request must have been served by a backup
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected successful response from backup node when all primaries are down"
     );
 }
 
