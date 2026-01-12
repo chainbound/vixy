@@ -1,12 +1,13 @@
 //! Integration test harness using cucumber
 //!
-//! This runs integration tests against real Docker/Kurtosis infrastructure.
-//! Prerequisites:
-//!   1. Start infrastructure: `cd docker && docker-compose up -d`
-//!   2. Start Vixy: `cargo run -- --config docker/vixy-integration.toml`
-//!   3. Run tests: `cargo test --test integration_cucumber`
+//! This runs integration tests against real Kurtosis Ethereum infrastructure.
 //!
-//! Or use the helper script: `./scripts/run-integration-tests.sh`
+//! Prerequisites:
+//!   1. Setup Kurtosis: `just kurtosis-up`
+//!   2. Start Vixy: `just kurtosis-vixy`
+//!   3. Run tests: `just kurtosis-test`
+//!
+//! Or all at once: `just integration-test`
 
 mod steps;
 mod world;
@@ -31,18 +32,18 @@ fn main() {
             }
             _ => {
                 eprintln!("╔════════════════════════════════════════════════════════════════╗");
-                eprintln!("║  Integration tests require running infrastructure!             ║");
+                eprintln!("║  Integration tests require Kurtosis infrastructure!            ║");
                 eprintln!("╠════════════════════════════════════════════════════════════════╣");
-                eprintln!("║  1. Start Docker containers:                                   ║");
-                eprintln!("║     cd docker && docker-compose up -d                          ║");
+                eprintln!("║  Quick start:                                                  ║");
+                eprintln!("║     just integration-test                                      ║");
                 eprintln!("║                                                                ║");
-                eprintln!("║  2. Start Vixy:                                                ║");
-                eprintln!("║     cargo run -- --config docker/vixy-integration.toml         ║");
+                eprintln!("║  Or step by step:                                              ║");
+                eprintln!("║     1. just kurtosis-up      # Start Kurtosis enclave          ║");
+                eprintln!("║     2. just kurtosis-vixy    # Start Vixy with Kurtosis config ║");
+                eprintln!("║     3. just kurtosis-test    # Run integration tests           ║");
                 eprintln!("║                                                                ║");
-                eprintln!("║  3. Run tests:                                                 ║");
-                eprintln!("║     cargo test --test integration_cucumber                     ║");
-                eprintln!("║                                                                ║");
-                eprintln!("║  Or use: ./scripts/run-integration-tests.sh                    ║");
+                eprintln!("║  Cleanup:                                                      ║");
+                eprintln!("║     just kurtosis-down       # Stop Kurtosis enclave           ║");
                 eprintln!("╚════════════════════════════════════════════════════════════════╝");
                 eprintln!();
                 eprintln!("Skipping integration tests (Vixy not running)");
