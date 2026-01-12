@@ -18,7 +18,7 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
 |-------|-------------|--------|
 | 1 | Project Setup | Completed |
 | 2 | BDD Infrastructure | Completed |
-| 3 | Configuration | Not Started |
+| 3 | Configuration | Completed |
 | 4 | State Management | Not Started |
 | 5 | EL Health Check | Not Started |
 | 6 | CL Health Check | Not Started |

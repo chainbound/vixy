@@ -7,6 +7,6 @@ use cucumber::World;
 use world::VixyWorld;
 
 fn main() {
-    // Run cucumber tests
+    // Run cucumber tests synchronously
     futures::executor::block_on(VixyWorld::run("tests/features"));
 }
