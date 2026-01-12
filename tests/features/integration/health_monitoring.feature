@@ -8,6 +8,7 @@ Feature: Health Monitoring Integration Tests
 
   @integration @health @status
   Scenario: Status endpoint returns all node states
+    Given all Kurtosis services are running
     When I request the status endpoint
     Then I should receive a JSON response
     And the response should contain EL node statuses

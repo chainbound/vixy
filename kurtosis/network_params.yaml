@@ -1,46 +1,31 @@
 # Kurtosis Ethereum Package Configuration for Vixy Integration Tests
-# This sets up a local Ethereum network with multiple EL and CL nodes
+# Minimal config with 2 nodes for faster startup and lower resource usage
 #
 # Usage:
 #   kurtosis run github.com/ethpandaops/ethereum-package --args-file network_params.yaml
-#
-# Prerequisites:
-#   - Docker installed and running
-#   - Kurtosis CLI installed: https://docs.kurtosis.com/install/
 
-# Network participants - defines EL/CL pairs
+# Network participants - 2 EL/CL pairs for basic failover testing
 participants:
   # Primary EL/CL pair (geth + lighthouse)
   - el_type: geth
     cl_type: lighthouse
     count: 1
 
-  # Secondary EL/CL pair (geth + prysm) - for failover testing
+  # Secondary EL/CL pair (geth + lighthouse) - for failover testing
   - el_type: geth
-    cl_type: prysm
-    count: 1
-
-  # Third EL/CL pair (nethermind + teku) - for diversity testing
-  - el_type: nethermind
-    cl_type: teku
+    cl_type: lighthouse
     count: 1
 
 # Network configuration
 network_params:
-  # Use minimal preset for faster block times (good for testing)
   preset: minimal
-  # Faster slot time for quicker testing (default is 12s)
   seconds_per_slot: 2
-  # Number of slots per epoch (minimal preset default)
-  slots_per_epoch: 8
-  # Genesis delay in seconds
   genesis_delay: 20
 
 # Global configuration
 global_log_level: info
 
 # Port publishing for local access
-# Kurtosis will assign ports dynamically, use `kurtosis enclave inspect` to find them
 port_publisher:
   nat_exit_ip: "127.0.0.1"
   el:

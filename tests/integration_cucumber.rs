@@ -15,17 +15,19 @@ mod world;
 use cucumber::World;
 use world::IntegrationWorld;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Check if we should run integration tests
     let skip_check = std::env::var("VIXY_SKIP_INTEGRATION_CHECK").is_ok();
 
     if !skip_check {
         // Verify Vixy is running before starting tests
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::Client::new();
         match client
             .get("http://127.0.0.1:8080/status")
             .timeout(std::time::Duration::from_secs(2))
             .send()
+            .await
         {
             Ok(resp) if resp.status().is_success() => {
                 eprintln!("✓ Vixy is running at http://127.0.0.1:8080");
@@ -52,11 +54,10 @@ fn main() {
         }
     }
 
-    // Run integration cucumber tests
-    futures::executor::block_on(
-        IntegrationWorld::cucumber()
-            .with_default_cli()
-            // Run only integration features
-            .run("tests/features/integration"),
-    );
+    // Run integration cucumber tests with Tokio runtime
+    IntegrationWorld::cucumber()
+        .with_default_cli()
+        // Run only integration features
+        .run("tests/features/integration")
+        .await;
 }

@@ -77,6 +77,13 @@ fi
 # Check if enclave already exists
 if kurtosis enclave inspect "$ENCLAVE_NAME" &> /dev/null; then
     echo_info "Enclave '$ENCLAVE_NAME' already exists."
+    echo_info "Ensuring all services are running..."
+    # Start all known services (in case some were stopped by previous tests)
+    for service in el-1-geth-lighthouse el-2-geth-lighthouse cl-1-lighthouse-geth cl-2-lighthouse-geth; do
+        kurtosis service start "$ENCLAVE_NAME" "$service" 2>/dev/null || true
+    done
+    # Wait for services to come up
+    sleep 5
     echo_info "Extracting endpoints from existing enclave..."
 else
     # Start Kurtosis enclave
@@ -92,9 +99,6 @@ fi
 
 # Get enclave info as JSON
 echo_step "Extracting node endpoints..."
-
-# Get all services
-SERVICES_JSON=$(kurtosis enclave inspect "$ENCLAVE_NAME" --full-uuids 2>/dev/null || true)
 
 # Generate Vixy config
 echo_step "Generating Vixy configuration..."
@@ -114,21 +118,20 @@ proxy_timeout_ms = 30000
 max_retries = 3
 
 [server]
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 8080
 
 [metrics]
 enabled = true
-host = "127.0.0.1"
+host = "0.0.0.0"
 port = 9090
 
+[el]
 HEADER
 
 # Extract EL nodes using kurtosis port print
-echo "" >> "$CONFIG_FILE"
-echo "# EL Nodes" >> "$CONFIG_FILE"
-
 EL_COUNT=0
+FIRST_EL=true
 for i in 1 2 3; do
     # Try different EL service naming patterns
     for pattern in "el-$i-geth-lighthouse" "el-$i-geth-prysm" "el-$i-nethermind-teku" "el-$i-geth" "el-$i"; do
@@ -137,20 +140,34 @@ for i in 1 2 3; do
 
         if [[ -n "$HTTP_PORT" ]]; then
             EL_COUNT=$((EL_COUNT + 1))
-            IS_PRIMARY="false"
-            [[ $EL_COUNT -eq 1 ]] && IS_PRIMARY="true"
 
-            # Default WS to HTTP if not available
-            [[ -z "$WS_PORT" ]] && WS_PORT="$HTTP_PORT"
+            # Default WS to HTTP port if not available
+            [[ -z "$WS_PORT" ]] && WS_PORT="${HTTP_PORT%:*}:${HTTP_PORT##*:}"
 
-            cat >> "$CONFIG_FILE" << EOF
-[[el_nodes]]
+            # First node is primary, rest are backup
+            if [[ "$FIRST_EL" == "true" ]]; then
+                echo "# Primary EL nodes" >> "$CONFIG_FILE"
+                cat >> "$CONFIG_FILE" << EOF
+[[el.primary]]
 name = "$pattern"
 http_url = "http://$HTTP_PORT"
 ws_url = "ws://$WS_PORT"
-is_primary = $IS_PRIMARY
 
 EOF
+                FIRST_EL=false
+            else
+                # Add backup section header only once
+                if [[ $EL_COUNT -eq 2 ]]; then
+                    echo "# Backup EL nodes" >> "$CONFIG_FILE"
+                fi
+                cat >> "$CONFIG_FILE" << EOF
+[[el.backup]]
+name = "$pattern"
+http_url = "http://$HTTP_PORT"
+ws_url = "ws://$WS_PORT"
+
+EOF
+            fi
             echo_info "  Found EL node: $pattern at $HTTP_PORT"
             break
         fi
@@ -158,7 +175,7 @@ EOF
 done
 
 # Extract CL nodes
-echo "# CL Nodes" >> "$CONFIG_FILE"
+echo "# CL nodes" >> "$CONFIG_FILE"
 
 CL_COUNT=0
 for i in 1 2 3; do
@@ -169,13 +186,21 @@ for i in 1 2 3; do
         if [[ -n "$HTTP_PORT" ]]; then
             CL_COUNT=$((CL_COUNT + 1))
 
+            # HTTP_PORT already includes the full address like "http://127.0.0.1:33001"
+            # So we need to check if it starts with http:// and not add it again
+            if [[ "$HTTP_PORT" == http://* ]]; then
+                CL_URL="$HTTP_PORT"
+            else
+                CL_URL="http://$HTTP_PORT"
+            fi
+
             cat >> "$CONFIG_FILE" << EOF
-[[cl_nodes]]
+[[cl]]
 name = "$pattern"
-url = "http://$HTTP_PORT"
+url = "$CL_URL"
 
 EOF
-            echo_info "  Found CL node: $pattern at $HTTP_PORT"
+            echo_info "  Found CL node: $pattern at $CL_URL"
             break
         fi
     done

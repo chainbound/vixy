@@ -96,8 +96,14 @@ async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
         .build()
         .expect("Failed to build HTTP client");
 
-    // Extract method and body
+    // Extract method, headers, and body
     let method = request.method().clone();
+    let content_type = request
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -106,8 +112,12 @@ async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
         }
     };
 
-    // Build the forwarded request
-    let forward_request = client.request(method, target_url).body(body_bytes);
+    // Build the forwarded request with Content-Type header
+    let mut forward_request = client.request(method, target_url);
+    if let Some(ct) = content_type {
+        forward_request = forward_request.header("content-type", ct);
+    }
+    forward_request = forward_request.body(body_bytes);
 
     // Send the request
     match forward_request.send().await {
@@ -130,8 +140,14 @@ async fn forward_request_to_url(request: Request<Body>, target_url: &str) -> Res
         .build()
         .expect("Failed to build HTTP client");
 
-    // Extract method and body
+    // Extract method, headers, and body
     let method = request.method().clone();
+    let content_type = request
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -140,9 +156,11 @@ async fn forward_request_to_url(request: Request<Body>, target_url: &str) -> Res
         }
     };
 
-    // Build the forwarded request
+    // Build the forwarded request with Content-Type header
     let mut forward_request = client.request(method, target_url);
-
+    if let Some(ct) = content_type {
+        forward_request = forward_request.header("content-type", ct);
+    }
     if !body_bytes.is_empty() {
         forward_request = forward_request.body(body_bytes);
     }
