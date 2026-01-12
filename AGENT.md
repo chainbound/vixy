@@ -149,7 +149,7 @@ Reset `requests_this_second` every second using a background timer or sliding wi
   - `serde` + `serde_json` (JSON parsing)
   - `toml` (config parsing)
   - `tracing` + `tracing-subscriber` (logging)
-  - `anyhow` or `thiserror` (error handling)
+  - `eyre` or `thiserror` (error handling)
   - `tokio-tungstenite` (WebSocket client for EL WS proxy)
   - `futures-util` (for stream handling with WebSocket)
   - `prometric` (Prometheus metrics - https://github.com/chainbound/prometric)
