@@ -1,0 +1,65 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Claude Review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            **/*.rs
+            Cargo.toml
+            Cargo.lock
+
+      - name: Setup Node.js
+        if: steps.changed-files.outputs.any_changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Claude Code
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run Claude Review
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the diff for changed Rust files
+          git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} -- '*.rs' 'Cargo.toml' > diff.txt
+
+          # If there's a diff, run Claude for code review
+          if [ -s diff.txt ]; then
+            echo "Running Claude code review on changed files..."
+            claude -p "You are reviewing a pull request for Vixy, a Rust Ethereum EL/CL proxy. Review the following diff for:
+            1. Correctness and potential bugs
+            2. Rust best practices and idiomatic code
+            3. Performance considerations
+            4. Security issues (especially around network handling and JSON parsing)
+            5. Test coverage suggestions
+
+            Be concise and actionable. Focus on significant issues only.
+
+            Diff:
+            $(cat diff.txt)" > review.md
+
+            # Post review as a comment
+            gh pr comment ${{ github.event.pull_request.number }} --body-file review.md
+          fi
