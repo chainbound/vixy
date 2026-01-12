@@ -11,6 +11,7 @@ use tokio::signal;
 use tracing::{error, info};
 
 use vixy::config::Config;
+use vixy::metrics::VixyMetrics;
 use vixy::monitor;
 use vixy::proxy::{http, ws};
 use vixy::state::AppState;
@@ -71,6 +72,10 @@ async fn main() -> eyre::Result<()> {
         "Health monitor started"
     );
 
+    // Initialize metrics
+    let metrics = Arc::new(VixyMetrics::new());
+    let metrics_for_handler = metrics.clone();
+
     // Build the router
     let app = Router::new()
         // EL HTTP proxy
@@ -81,6 +86,14 @@ async fn main() -> eyre::Result<()> {
         .route("/cl/{*path}", axum::routing::any(http::cl_proxy_handler))
         // Health endpoint for the proxy itself
         .route("/health", axum::routing::get(|| async { "OK" }))
+        // Metrics endpoint for Prometheus
+        .route(
+            "/metrics",
+            axum::routing::get(move || {
+                let metrics = metrics_for_handler.clone();
+                async move { metrics.render() }
+            }),
+        )
         .with_state(state);
 
     // Parse listen address

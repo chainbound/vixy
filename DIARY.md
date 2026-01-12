@@ -30,6 +30,38 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 10: Metrics (TDD Complete)
+
+**What I did:**
+- **Tests**: Wrote 6 unit tests in src/metrics.rs:
+  - test_metrics_initialization - all counters/gauges start at 0
+  - test_el_request_counter_increments - counter increments correctly
+  - test_cl_request_counter_increments - CL counter works
+  - test_gauge_updates - gauges can be set to any value
+  - test_metrics_render - Prometheus format output is correct
+  - test_failover_counter - failover tracking works
+
+- **Implementation**:
+  - VixyMetrics struct with atomic counters and gauges
+  - Counters: el_requests_total, cl_requests_total, el_failovers_total
+  - Gauges: el_chain_head, cl_chain_head, el_healthy_nodes, cl_healthy_nodes
+  - render() method produces Prometheus text format output
+  - Added /metrics endpoint to main.rs router
+
+**Challenges faced:**
+- Chose simple AtomicU64 implementation over complex prometric macros
+
+**How I solved it:**
+- Used manual Prometheus text format rendering
+- AtomicU64 provides thread-safe counters and gauges without locks
+
+**What I learned:**
+- Prometheus text format is simple: # HELP, # TYPE, then metric name + value
+- AtomicU64 with Ordering::SeqCst is safe for metrics
+- Metrics can be shared across handlers using Arc
+
+**Mood:** Clean - simple implementation that works!
+
 ### 2026-01-12 - Phase 9: Main Entry Point
 
 **What I did:**

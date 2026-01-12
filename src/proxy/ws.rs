@@ -168,12 +168,8 @@ async fn handle_websocket(client_socket: WebSocket, upstream_url: String) {
 mod tests {
     use super::*;
     use crate::state::ElNodeState;
-    use axum::body::Body;
-    use axum::http::Request;
-    use axum::Router;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use tower::util::ServiceExt;
 
     // Helper to create minimal AppState for testing
     fn create_test_state(el_nodes: Vec<ElNodeState>) -> Arc<AppState> {
