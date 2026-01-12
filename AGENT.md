@@ -157,6 +157,18 @@ Reset `requests_this_second` every second using a background timer or sliding wi
   - `src/proxy/mod.rs`, `selection.rs`, `http.rs`, `ws.rs` (empty functions)
   - `src/monitor.rs` (empty function)
   - `src/metrics.rs` (empty struct)
+- [ ] Create `justfile` for common development commands:
+  - `fmt` - format code
+  - `fmt-check` - check formatting without modifying
+  - `clippy` - run clippy lints
+  - `test` - run unit tests (TDD)
+  - `test-bdd` - run BDD tests (cucumber)
+  - `test-all` - run both TDD and BDD tests
+  - `ci` - run full CI checks (fmt-check, clippy, test-all)
+- [ ] Create GitHub Actions CI workflow `.github/workflows/ci.yml`:
+  - Trigger on push/PR to main branch
+  - Jobs: format check, clippy, unit tests (TDD), BDD tests (cucumber), build
+  - Use rust caching for faster CI runs
 
 ### Phase 2: Setup BDD Infrastructure
 
@@ -479,10 +491,12 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 - [ ] Run `cargo test metrics` - metrics tests should now PASS ✓
 
 ### Phase 11: Final Verification
-- [ ] Run `cargo test` - ALL unit tests should PASS ✓
-- [ ] Run `cargo test --test cucumber` - ALL BDD tests should PASS ✓
-- [ ] Run `cargo clippy` - no warnings
-- [ ] Run `cargo fmt --check` - code is formatted
+- [ ] Run `just ci` (or manually: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo test --test cucumber`)
+  - [ ] `cargo fmt --check` - code is formatted
+  - [ ] `cargo clippy -- -D warnings` - no warnings
+  - [ ] `cargo test` - ALL unit tests should PASS ✓
+  - [ ] `cargo test --test cucumber` - ALL BDD tests should PASS ✓
+- [ ] Verify GitHub Actions CI passes on push/PR
 
 ### Phase 12: Enhancements (Optional)
 - [ ] Add `/status` endpoint to view all node health states as JSON
@@ -558,13 +572,22 @@ curl http://localhost:8080/cl/eth/v1/beacon/headers/head
 
 # Check Prometheus metrics
 curl http://localhost:8080/metrics
+```
 
-# Run unit tests (TDD)
-cargo test
+## Development Commands
 
-# Run BDD tests (cucumber)
-cargo test --test cucumber
+```bash
+# Using just (recommended)
+just              # Show all available commands
+just fmt          # Format code
+just clippy       # Run lints
+just test         # Run unit tests (TDD)
+just test-bdd     # Run BDD tests (cucumber)
+just ci           # Run full CI checks
 
-# Run all tests with output
-cargo test -- --nocapture
+# Using cargo directly
+cargo test                    # Unit tests (TDD)
+cargo test --test cucumber    # BDD tests
+cargo fmt --check             # Check formatting
+cargo clippy -- -D warnings   # Run lints
 ```
