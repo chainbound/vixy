@@ -141,7 +141,6 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 > - `fix(proxy): handle rate limit edge case when all nodes exhausted`
 
 ### Phase 1: Project Setup
-- [ ] Fix Cargo.toml edition from "2024" to "2021"
 - [ ] Add dependencies to Cargo.toml:
   - `tokio` (async runtime with full features)
   - `axum` (HTTP server for proxy)
