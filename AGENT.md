@@ -497,6 +497,20 @@ Failover logic:
 - [ ] Add TLS/HTTPS support
 - [ ] Add CL WebSocket support (CL events API)
 
+### Phase 13: Write the Story
+- [ ] Create `BLOG.md` - a blog post telling the story of building Vixy with an AI Agent
+  - Use `DIARY.md` as the primary resource for content
+  - Highlight the engineering practices applied:
+    - TDD (Test-Driven Development) - tests first, then implementation
+    - BDD (Behavior-Driven Development) - cucumber scenarios for acceptance tests
+    - CI/CD - automated checks on every push/PR
+    - Small incremental commits - frequent, focused, well-documented changes
+    - Good documentation - AGENT.md as the blueprint, README.md for users
+  - Emphasize the speed and precision of AI-assisted development
+  - Include specific examples of challenges overcome (from DIARY.md)
+  - Reflect on what worked well and what could be improved
+  - Make it engaging - this is a story, not just a technical report
+
 ---
 
 ## File Structure (Target)
