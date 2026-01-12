@@ -41,9 +41,8 @@ async fn vixy_running_with_integration_config(world: &mut IntegrationWorld) {
         }
         Err(e) => {
             panic!(
-                "Failed to connect to Vixy at {}: {}. \
-                 Make sure Vixy is running with: just kurtosis-vixy",
-                url, e
+                "Failed to connect to Vixy at {url}: {e}. \
+                 Make sure Vixy is running with: just kurtosis-vixy"
             );
         }
     }
@@ -67,8 +66,7 @@ async fn el_nodes_are_healthy(world: &mut IntegrationWorld) {
 
     assert!(
         healthy_count > 0,
-        "No healthy EL nodes found. Status: {:?}",
-        status
+        "No healthy EL nodes found. Status: {status:?}"
     );
     world.healthy_el_count = healthy_count;
 }
@@ -91,8 +89,7 @@ async fn cl_nodes_are_healthy(world: &mut IntegrationWorld) {
 
     assert!(
         healthy_count > 0,
-        "No healthy CL nodes found. Status: {:?}",
-        status
+        "No healthy CL nodes found. Status: {status:?}"
     );
     world.healthy_cl_count = healthy_count;
 }
@@ -194,15 +191,13 @@ async fn verify_block_number_response(world: &mut IntegrationWorld) {
 
     assert!(
         json.get("result").is_some(),
-        "Response missing 'result' field: {}",
-        body
+        "Response missing 'result' field: {body}"
     );
 
     let result = json["result"].as_str().expect("result should be string");
     assert!(
         result.starts_with("0x"),
-        "Block number should be hex: {}",
-        result
+        "Block number should be hex: {result}"
     );
 }
 
@@ -220,16 +215,11 @@ async fn verify_chain_id_response(world: &mut IntegrationWorld) {
 
     assert!(
         json.get("result").is_some(),
-        "Response missing 'result' field: {}",
-        body
+        "Response missing 'result' field: {body}"
     );
 
     let result = json["result"].as_str().expect("result should be string");
-    assert!(
-        result.starts_with("0x"),
-        "Chain ID should be hex: {}",
-        result
-    );
+    assert!(result.starts_with("0x"), "Chain ID should be hex: {result}");
 }
 
 #[then("I should receive valid responses for both methods")]
@@ -250,8 +240,7 @@ async fn verify_batch_response(world: &mut IntegrationWorld) {
     for resp in responses {
         assert!(
             resp.get("result").is_some(),
-            "Batch response missing 'result': {:?}",
-            resp
+            "Batch response missing 'result': {resp:?}"
         );
     }
 }
@@ -307,8 +296,7 @@ async fn verify_beacon_header_response(world: &mut IntegrationWorld) {
 
     assert!(
         json.get("data").is_some(),
-        "Response missing 'data' field: {}",
-        body
+        "Response missing 'data' field: {body}"
     );
 }
 
@@ -320,8 +308,7 @@ async fn verify_slot_in_response(world: &mut IntegrationWorld) {
     let slot = &json["data"]["header"]["message"]["slot"];
     assert!(
         slot.is_string() || slot.is_number(),
-        "Slot should be present: {}",
-        body
+        "Slot should be present: {body}"
     );
 }
 
@@ -334,13 +321,11 @@ async fn verify_syncing_response(world: &mut IntegrationWorld) {
 
     assert!(
         json.get("data").is_some(),
-        "Response missing 'data' field: {}",
-        body
+        "Response missing 'data' field: {body}"
     );
     assert!(
         json["data"].get("is_syncing").is_some(),
-        "Response missing 'is_syncing' field: {}",
-        body
+        "Response missing 'is_syncing' field: {body}"
     );
 }
 
@@ -370,7 +355,7 @@ async fn verify_json_response(world: &mut IntegrationWorld) {
 
     let body = world.last_response_body.as_ref().expect("No response body");
     let _json: serde_json::Value =
-        serde_json::from_str(body).expect(&format!("Invalid JSON: {}", body));
+        serde_json::from_str(body).unwrap_or_else(|_| panic!("Invalid JSON: {body}"));
 }
 
 #[then("the response should contain EL node statuses")]
@@ -511,7 +496,7 @@ async fn request_metrics_endpoint(world: &mut IntegrationWorld) {
         Err(e) => {
             // Metrics might not be running - mark as skipped
             world.last_status_code = None;
-            world.last_response_body = Some(format!("Metrics endpoint not available: {}", e));
+            world.last_response_body = Some(format!("Metrics endpoint not available: {e}"));
         }
     }
 }
@@ -529,8 +514,7 @@ async fn verify_prometheus_format(world: &mut IntegrationWorld) {
     // Prometheus format has lines like: metric_name{labels} value
     assert!(
         body.contains("# HELP") || body.contains("# TYPE") || body.contains("vixy"),
-        "Response doesn't look like Prometheus format: {}",
-        body
+        "Response doesn't look like Prometheus format: {body}"
     );
 }
 
@@ -545,8 +529,7 @@ async fn verify_health_gauges(world: &mut IntegrationWorld) {
     // Check for expected metric names
     assert!(
         body.contains("el_node") || body.contains("cl_node") || body.contains("healthy"),
-        "Metrics don't include node health gauges: {}",
-        body
+        "Metrics don't include node health gauges: {body}"
     );
 }
 
@@ -655,21 +638,29 @@ async fn ensure_all_services_running(world: &mut IntegrationWorld) {
             if let Ok(status) = resp.json::<serde_json::Value>().await {
                 let el_healthy = status["el_nodes"]
                     .as_array()
-                    .map(|nodes| nodes.iter().all(|n| n["is_healthy"].as_bool().unwrap_or(false)))
+                    .map(|nodes| {
+                        nodes
+                            .iter()
+                            .all(|n| n["is_healthy"].as_bool().unwrap_or(false))
+                    })
                     .unwrap_or(false);
                 let cl_healthy = status["cl_nodes"]
                     .as_array()
-                    .map(|nodes| nodes.iter().all(|n| n["is_healthy"].as_bool().unwrap_or(false)))
+                    .map(|nodes| {
+                        nodes
+                            .iter()
+                            .all(|n| n["is_healthy"].as_bool().unwrap_or(false))
+                    })
                     .unwrap_or(false);
 
                 if el_healthy && cl_healthy {
-                    eprintln!("All nodes healthy after {} attempts", attempt);
+                    eprintln!("All nodes healthy after {attempt} attempts");
                     return;
                 }
             }
         }
     }
-    eprintln!("Warning: Not all nodes healthy after {} attempts", max_attempts);
+    eprintln!("Warning: Not all nodes healthy after {max_attempts} attempts");
 }
 
 #[given("the primary EL node is stopped")]
@@ -716,9 +707,9 @@ async fn stop_all_primary_el_nodes(world: &mut IntegrationWorld) {
     for service in EL_PRIMARY_SERVICES {
         if kurtosis_stop_service(service).await {
             world.stopped_containers.push(service.to_string());
-            eprintln!("Stopped primary EL node: {}", service);
+            eprintln!("Stopped primary EL node: {service}");
         } else {
-            eprintln!("Warning: Failed to stop EL service: {}", service);
+            eprintln!("Warning: Failed to stop EL service: {service}");
         }
     }
     // Wait for Vixy to detect all nodes are down and activate failover
@@ -840,8 +831,6 @@ async fn subscribe_new_heads(world: &mut IntegrationWorld) {
 async fn verify_new_headers(world: &mut IntegrationWorld) {
     // Placeholder - would verify WebSocket messages
     // Skip if not actually connected
-    if !world.ws_connected {
-        return;
-    }
+    if !world.ws_connected {}
     // In a real implementation, we'd wait for and verify headers
 }
