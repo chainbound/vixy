@@ -23,7 +23,6 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
      +--------+--------+          +--------+--------+
      |  EL Node Pool   |          |  CL Node Pool   |
      | healthy/lagging |          | healthy/lagging |
-     | rate-limited    |          |                 |
      +--------+--------+          +--------+--------+
               |                             |
               +--------------+--------------+
@@ -50,30 +49,22 @@ health_check_interval_ms = 1000
 name = "geth-1"
 http_url = "http://localhost:8545"
 ws_url = "ws://localhost:8546"
-max_consecutive = 150
-max_per_second = 100
 
 [[el.primary]]
 name = "geth-2"
 http_url = "http://localhost:8547"
 ws_url = "ws://localhost:8548"
-max_consecutive = 150
-max_per_second = 100
 
 # Backup EL nodes - only used when ALL primary nodes are unavailable
 [[el.backup]]
 name = "alchemy-1"
 http_url = "https://eth-mainnet.g.alchemy.com/v2/xxx"
 ws_url = "wss://eth-mainnet.g.alchemy.com/v2/xxx"
-max_consecutive = 100
-max_per_second = 25
 
 [[el.backup]]
 name = "infura-1"
 http_url = "https://mainnet.infura.io/v3/xxx"
 ws_url = "wss://mainnet.infura.io/ws/v3/xxx"
-max_consecutive = 100
-max_per_second = 25
 
 [[cl]]
 name = "lighthouse-1"
@@ -100,21 +91,9 @@ EL nodes are split into two lists:
 
 Failover logic:
 1. Try to select from primary nodes first
-2. If NO primary node is available (all unhealthy or rate-limited), use backup nodes
+2. If NO primary node is available (all unhealthy), use backup nodes
 3. Health monitoring runs on BOTH primary and backup nodes continuously
 4. When a primary node becomes available again, switch back to primary
-
-### EL Rate Limiting
-Each EL node (both primary and backup) has rate limiting to prevent overloading:
-- `max_consecutive`: Max times to use this node in a row before rotating to another
-- `max_per_second`: Max queries per second (QPS) allowed
-
-A node is **unavailable** for selection if:
-- `consecutive_count >= max_consecutive` (must rotate to another node)
-- `requests_this_second >= max_per_second` (rate limit hit)
-
-When a different node is selected, reset `consecutive_count` for all nodes.
-Reset `requests_this_second` every second using a background timer or sliding window.
 
 ### CL (Consensus Layer)
 1. Call `GET /eth/v1/node/health` → must return HTTP 200
@@ -138,7 +117,15 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 > - `feat(config): add TOML config parsing with Global and ElNode structs`
 > - `test(el_health): add unit tests for hex block number parsing`
 > - `feat(health/el): implement eth_getBlockNumber health check`
-> - `fix(proxy): handle rate limit edge case when all nodes exhausted`
+> - `fix(proxy): handle failover edge case when all primary nodes down`
+
+> **DIARY.md**: Create and maintain a `DIARY.md` file as a development log. Update it whenever you:
+> - Complete a task or phase (what was done, what was learned)
+> - Encounter hardships or blockers (what went wrong, how it was resolved)
+> - Make important decisions (why a certain approach was chosen)
+> - Discover something interesting or unexpected
+>
+> This log will be used to create a documentary of the development journey. Write in first person, be honest about struggles, and capture the human (or AI) side of building software.
 
 ### Phase 1: Project Setup
 - [ ] Add dependencies to Cargo.toml:
@@ -254,7 +241,7 @@ Reset `requests_this_second` every second using a background timer or sliding wi
   - [ ] `Config` struct with `Global`, `El`, `Vec<Cl>`
   - [ ] `Global` struct with `max_el_lag_blocks`, `max_cl_lag_slots`, `health_check_interval_ms`
   - [ ] `El` struct with `primary: Vec<ElNode>`, `backup: Vec<ElNode>`
-  - [ ] `ElNode` struct with `name`, `http_url`, `ws_url`, `max_consecutive`, `max_per_second`
+  - [ ] `ElNode` struct with `name`, `http_url`, `ws_url`
   - [ ] `Cl` struct with `name`, `url`
   - [ ] `Config::load(path)` and `Config::from_str(s)` to parse TOML
 - [ ] Run `cargo test config` - should PASS (GREEN ✓)
@@ -276,7 +263,7 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 
 #### 4.2 Implement (GREEN)
 - [ ] Implement `src/state.rs`:
-  - [ ] `ElNodeState` struct (name, urls, block_number, is_healthy, lag, rate limit fields)
+  - [ ] `ElNodeState` struct (name, urls, block_number, is_healthy, lag)
   - [ ] `ClNodeState` struct (name, url, slot, health_ok, is_healthy, lag)
   - [ ] `AppState` struct (Arc<RwLock<Vec<...>>> for nodes, AtomicU64 for chain heads, AtomicBool for failover)
 - [ ] Run `cargo test state` - should PASS (GREEN ✓)
@@ -373,23 +360,16 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 8.2
 
 - [ ] Write BDD features:
-  - [ ] `tests/features/el_rate_limit.feature` (max_consecutive, max_per_second, reset)
   - [ ] `tests/features/el_failover.feature` (primary preference, backup failover, recovery)
   - [ ] `tests/features/proxy_http.feature` (forward requests, 503 on no healthy)
   - [ ] `tests/features/proxy_ws.feature` (establish connection, bidirectional, reconnect)
-- [ ] Write step definitions in `tests/steps/` (rate_limit, failover, proxy)
+- [ ] Write step definitions in `tests/steps/` (failover, proxy)
 - [ ] Write unit tests for `src/proxy/selection.rs`:
   - [ ] `test_select_healthy_node_from_list`
   - [ ] `test_select_skips_unhealthy_nodes`
-  - [ ] `test_select_skips_rate_limited_nodes`
-  - [ ] `test_select_skips_max_consecutive_nodes`
   - [ ] `test_select_primary_before_backup`
   - [ ] `test_select_backup_when_no_primary_available`
   - [ ] `test_select_returns_none_when_all_unavailable`
-  - [ ] `test_consecutive_count_increments`
-  - [ ] `test_consecutive_count_resets_on_switch`
-  - [ ] `test_qps_counter_increments`
-  - [ ] `test_qps_counter_resets_after_second`
 - [ ] Write unit tests for `src/proxy/http.rs`:
   - [ ] `test_el_proxy_forwards_request`
   - [ ] `test_el_proxy_returns_503_no_healthy_nodes`
@@ -407,7 +387,7 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 
 #### 8.2 Implement (GREEN)
 - [ ] Implement `src/proxy/mod.rs`
-- [ ] Implement `src/proxy/selection.rs` (node selection with rate limiting + failover)
+- [ ] Implement `src/proxy/selection.rs` (node selection with failover)
 - [ ] Implement `src/proxy/http.rs` (EL and CL HTTP handlers)
 - [ ] Implement `src/proxy/ws.rs` (WebSocket upgrade and bidirectional piping)
 - [ ] Run `cargo test proxy` - should PASS (GREEN ✓)
@@ -534,7 +514,7 @@ src/
 │   └── cl.rs         # CL health check (node/health + headers/head)
 └── proxy/
     ├── mod.rs        # Module exports
-    ├── selection.rs  # Node selection logic (health + rate limiting)
+    ├── selection.rs  # Node selection logic (health + failover)
     ├── http.rs       # HTTP proxy for EL and CL
     └── ws.rs         # WebSocket proxy for EL (eth_subscribe support)
 
@@ -545,7 +525,6 @@ tests/
 │   ├── config.feature
 │   ├── el_health.feature
 │   ├── cl_health.feature
-│   ├── el_rate_limit.feature
 │   ├── el_failover.feature
 │   ├── proxy_http.feature
 │   └── proxy_ws.feature
@@ -554,7 +533,6 @@ tests/
     ├── config_steps.rs
     ├── el_health_steps.rs
     ├── cl_health_steps.rs
-    ├── rate_limit_steps.rs
     ├── failover_steps.rs
     └── proxy_steps.rs
 ```
