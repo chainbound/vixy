@@ -19,7 +19,9 @@ use vixy::state::AppState;
 /// Vixy - Ethereum EL and CL Proxy
 #[derive(Parser, Debug)]
 #[command(name = "vixy")]
-#[command(about = "A proxy that monitors Ethereum EL/CL nodes and routes requests to healthy nodes")]
+#[command(
+    about = "A proxy that monitors Ethereum EL/CL nodes and routes requests to healthy nodes"
+)]
 struct Args {
     /// Path to the configuration file
     #[arg(short, long, default_value = "config.toml")]
@@ -67,10 +69,7 @@ async fn main() -> eyre::Result<()> {
         monitor::run_health_monitor(monitor_state, monitor_interval).await;
     });
 
-    info!(
-        interval_ms = monitor_interval,
-        "Health monitor started"
-    );
+    info!(interval_ms = monitor_interval, "Health monitor started");
 
     // Initialize metrics
     let metrics = Arc::new(VixyMetrics::new());

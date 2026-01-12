@@ -165,7 +165,9 @@ pub fn update_failover_flag(state: &Arc<AppState>, any_primary_healthy: bool) {
     let is_failover = !any_primary_healthy;
 
     if was_failover != is_failover {
-        state.el_failover_active.store(is_failover, Ordering::SeqCst);
+        state
+            .el_failover_active
+            .store(is_failover, Ordering::SeqCst);
 
         if is_failover {
             warn!("EL failover ACTIVATED - all primary nodes unhealthy, using backups");
@@ -181,10 +183,7 @@ pub fn update_failover_flag(state: &Arc<AppState>, any_primary_healthy: bool) {
 pub async fn run_health_monitor(state: Arc<AppState>, interval_ms: u64) {
     let interval = Duration::from_millis(interval_ms);
 
-    info!(
-        interval_ms,
-        "Starting health monitor"
-    );
+    info!(interval_ms, "Starting health monitor");
 
     loop {
         run_health_check_cycle(&state).await;
@@ -491,8 +490,7 @@ health_check_interval_ms = 100
             .mount(&backup_mock)
             .await;
 
-        let config =
-            create_config_with_backup(&[&primary_mock.uri()], &[&backup_mock.uri()], &[]);
+        let config = create_config_with_backup(&[&primary_mock.uri()], &[&backup_mock.uri()], &[]);
         let state = Arc::new(AppState::new(&config));
 
         // Initially failover should be inactive
@@ -540,8 +538,7 @@ health_check_interval_ms = 100
             .mount(&backup_mock)
             .await;
 
-        let config =
-            create_config_with_backup(&[&primary_mock.uri()], &[&backup_mock.uri()], &[]);
+        let config = create_config_with_backup(&[&primary_mock.uri()], &[&backup_mock.uri()], &[]);
         let state = Arc::new(AppState::new(&config));
 
         // Set failover as active (simulating previous failure)

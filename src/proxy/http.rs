@@ -32,16 +32,16 @@ pub async fn el_proxy_handler(
             Some(n) => (n.http_url.clone(), n.name.clone()),
             None => {
                 warn!("No healthy EL node available");
-                return (StatusCode::SERVICE_UNAVAILABLE, "No healthy EL node available").into_response();
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "No healthy EL node available",
+                )
+                    .into_response();
             }
         }
     };
 
-    debug!(
-        target_url,
-        node_name,
-        "Proxying EL request"
-    );
+    debug!(target_url, node_name, "Proxying EL request");
 
     // Forward the request
     forward_request(request, &target_url).await
@@ -61,7 +61,11 @@ pub async fn cl_proxy_handler(
             Some(n) => (n.url.clone(), n.name.clone()),
             None => {
                 warn!("No healthy CL node available");
-                return (StatusCode::SERVICE_UNAVAILABLE, "No healthy CL node available").into_response();
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "No healthy CL node available",
+                )
+                    .into_response();
             }
         }
     };
@@ -69,15 +73,15 @@ pub async fn cl_proxy_handler(
     // Extract the path from the request (strip /cl prefix)
     let path = request.uri().path();
     let cl_path = path.strip_prefix("/cl").unwrap_or(path);
-    let query = request.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
+    let query = request
+        .uri()
+        .query()
+        .map(|q| format!("?{q}"))
+        .unwrap_or_default();
 
     let full_url = format!("{}{}{}", target_url.trim_end_matches('/'), cl_path, query);
 
-    debug!(
-        full_url,
-        node_name,
-        "Proxying CL request"
-    );
+    debug!(full_url, node_name, "Proxying CL request");
 
     // Forward the request to the constructed URL
     forward_request_to_url(request, &full_url).await
@@ -172,14 +176,14 @@ async fn convert_response(response: reqwest::Response) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{ClNodeState, ElNodeState};
     use axum::body::Body;
     use axum::http::Request;
     use axum::Router;
-    use crate::state::{ElNodeState, ClNodeState};
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use tower::util::ServiceExt;
-    use wiremock::matchers::{method, path, body_string};
+    use wiremock::matchers::{body_string, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // Helper to create minimal AppState for testing
@@ -228,7 +232,9 @@ mod tests {
         let mock_server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(body_string(r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#))
+            .and(body_string(
+                r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#,
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "jsonrpc": "2.0",
                 "result": "0x10d4f",
@@ -248,14 +254,18 @@ mod tests {
             .method("POST")
             .uri("/el")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#))
+            .body(Body::from(
+                r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#,
+            ))
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["result"], "0x10d4f");
     }
@@ -344,7 +354,9 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["data"]["header"]["message"]["slot"], "12345");
     }

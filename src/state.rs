@@ -37,7 +37,7 @@ impl ElNodeState {
             ws_url: node.ws_url.clone(),
             is_primary,
             block_number: 0,
-            check_ok: false, // Start with check not ok
+            check_ok: false,   // Start with check not ok
             is_healthy: false, // Start unhealthy until health check passes
             lag: 0,
         }

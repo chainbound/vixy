@@ -264,8 +264,7 @@ fn then_parsing_fails_invalid_url(world: &mut VixyWorld) {
     let error = world.last_error.as_ref().expect("Expected an error");
     assert!(
         error.to_lowercase().contains("url") || error.contains("invalid"),
-        "Expected error about invalid URL, got: {}",
-        error
+        "Expected error about invalid URL, got: {error}",
     );
 }
 

@@ -125,7 +125,10 @@ mod tests {
 
         // With failover, should select backup
         let with_failover = select_el_node(&nodes, true);
-        assert!(with_failover.is_some(), "With failover, should select backup");
+        assert!(
+            with_failover.is_some(),
+            "With failover, should select backup"
+        );
         assert_eq!(with_failover.unwrap().name, "backup-1");
     }
 

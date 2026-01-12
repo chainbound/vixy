@@ -4,6 +4,7 @@ use cucumber::World;
 
 /// The test world state for Vixy BDD tests
 #[derive(Debug, Default, World)]
+#[allow(dead_code)]
 pub struct VixyWorld {
     /// Raw TOML configuration string for parsing tests
     pub config_toml: Option<String>,

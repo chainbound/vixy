@@ -15,10 +15,7 @@ use crate::proxy::selection;
 use crate::state::AppState;
 
 /// Handle EL WebSocket upgrade requests (GET /el/ws)
-pub async fn el_ws_handler(
-    State(state): State<Arc<AppState>>,
-    ws: WebSocketUpgrade,
-) -> Response {
+pub async fn el_ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
     // Read the failover flag
     let failover_active = state.el_failover_active.load(Ordering::SeqCst);
 
@@ -31,7 +28,10 @@ pub async fn el_ws_handler(
             Some(n) => n.ws_url.clone(),
             None => {
                 warn!("No healthy EL node available for WebSocket");
-                return (StatusCode::SERVICE_UNAVAILABLE, "No healthy EL node available")
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "No healthy EL node available",
+                )
                     .into_response();
             }
         }
@@ -119,24 +119,40 @@ async fn handle_websocket(client_socket: WebSocket, upstream_url: String) {
                 Ok(TungsteniteMessage::Text(text)) => {
                     debug!(direction = "upstream->client", "Forwarding text message");
                     // Convert tungstenite Utf8Bytes to &str then to axum's Utf8Bytes
-                    if client_sender.send(Message::Text(text.as_str().into())).await.is_err() {
+                    if client_sender
+                        .send(Message::Text(text.as_str().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
                 Ok(TungsteniteMessage::Binary(data)) => {
                     debug!(direction = "upstream->client", "Forwarding binary message");
                     // Convert tungstenite Bytes to &[u8] then to axum Bytes
-                    if client_sender.send(Message::Binary(data.as_ref().to_vec().into())).await.is_err() {
+                    if client_sender
+                        .send(Message::Binary(data.as_ref().to_vec().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
                 Ok(TungsteniteMessage::Ping(data)) => {
-                    if client_sender.send(Message::Ping(data.as_ref().to_vec().into())).await.is_err() {
+                    if client_sender
+                        .send(Message::Ping(data.as_ref().to_vec().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
                 Ok(TungsteniteMessage::Pong(data)) => {
-                    if client_sender.send(Message::Pong(data.as_ref().to_vec().into())).await.is_err() {
+                    if client_sender
+                        .send(Message::Pong(data.as_ref().to_vec().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
