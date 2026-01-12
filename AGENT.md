@@ -46,14 +46,14 @@ max_cl_lag_slots = 3
 health_check_interval_ms = 1000
 
 # Primary EL nodes - used first
-[[el_nodes.primary]]
+[[el.primary]]
 name = "geth-1"
 http_url = "http://localhost:8545"
 ws_url = "ws://localhost:8546"
 max_consecutive = 150
 max_per_second = 100
 
-[[el_nodes.primary]]
+[[el.primary]]
 name = "geth-2"
 http_url = "http://localhost:8547"
 ws_url = "ws://localhost:8548"
@@ -61,25 +61,25 @@ max_consecutive = 150
 max_per_second = 100
 
 # Backup EL nodes - only used when ALL primary nodes are unavailable
-[[el_nodes.backup]]
+[[el.backup]]
 name = "alchemy-1"
 http_url = "https://eth-mainnet.g.alchemy.com/v2/xxx"
 ws_url = "wss://eth-mainnet.g.alchemy.com/v2/xxx"
 max_consecutive = 100
 max_per_second = 25
 
-[[el_nodes.backup]]
+[[el.backup]]
 name = "infura-1"
 http_url = "https://mainnet.infura.io/v3/xxx"
 ws_url = "wss://mainnet.infura.io/ws/v3/xxx"
 max_consecutive = 100
 max_per_second = 25
 
-[[cl_nodes]]
+[[cl]]
 name = "lighthouse-1"
 url = "http://localhost:5052"
 
-[[cl_nodes]]
+[[cl]]
 name = "prysm-1"
 url = "http://localhost:5053"
 ```
@@ -134,6 +134,12 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 
 > **IMPORTANT**: After completing each phase, update the Progress table in `README.md` to reflect the current status (Not Started → In Progress → Completed).
 
+> **GIT COMMITS**: Commit often with verbose, descriptive messages. Each logical change should be its own commit. Examples:
+> - `feat(config): add TOML config parsing with Global and ElNode structs`
+> - `test(el_health): add unit tests for hex block number parsing`
+> - `feat(health/el): implement eth_getBlockNumber health check`
+> - `fix(proxy): handle rate limit edge case when all nodes exhausted`
+
 ### Phase 1: Project Setup
 - [ ] Fix Cargo.toml edition from "2024" to "2021"
 - [ ] Add dependencies to Cargo.toml:
@@ -187,8 +193,8 @@ Reset `requests_this_second` every second using a background timer or sliding wi
     #[derive(Debug, Default, World)]
     pub struct VixyWorld {
         pub config: Option<Config>,
-        pub el_nodes: Vec<ElNodeState>,
-        pub cl_nodes: Vec<ClNodeState>,
+        pub el: Vec<ElNodeState>,
+        pub cl: Vec<ClNodeState>,
         pub mock_servers: Vec<MockServer>,
         pub selected_node: Option<String>,
         pub last_response: Option<Response>,
@@ -237,8 +243,8 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 - [ ] Write step definitions in `tests/steps/config_steps.rs`
 - [ ] Write unit tests in `src/config.rs` `#[cfg(test)]` module:
   - [ ] `test_parse_valid_config`
-  - [ ] `test_parse_config_missing_el_nodes_fails`
-  - [ ] `test_parse_config_missing_cl_nodes_fails`
+  - [ ] `test_parse_config_missing_el_fails`
+  - [ ] `test_parse_config_missing_cl_fails`
   - [ ] `test_parse_config_invalid_url_fails`
   - [ ] `test_default_values_applied`
 - [ ] Create stub structs/functions so tests compile (use `unimplemented!()`)
@@ -246,11 +252,11 @@ Reset `requests_this_second` every second using a background timer or sliding wi
 
 #### 3.2 Implement (GREEN)
 - [ ] Implement `src/config.rs`:
-  - [ ] `Config` struct with `Settings`, `ElNodes`, `Vec<ClNode>`
-  - [ ] `Settings` struct with `max_el_lag_blocks`, `max_cl_lag_slots`, `health_check_interval_ms`
-  - [ ] `ElNodes` struct with `primary: Vec<ElNode>`, `backup: Vec<ElNode>`
+  - [ ] `Config` struct with `Global`, `El`, `Vec<Cl>`
+  - [ ] `Global` struct with `max_el_lag_blocks`, `max_cl_lag_slots`, `health_check_interval_ms`
+  - [ ] `El` struct with `primary: Vec<ElNode>`, `backup: Vec<ElNode>`
   - [ ] `ElNode` struct with `name`, `http_url`, `ws_url`, `max_consecutive`, `max_per_second`
-  - [ ] `ClNode` struct with `name`, `url`
+  - [ ] `Cl` struct with `name`, `url`
   - [ ] `Config::load(path)` and `Config::from_str(s)` to parse TOML
 - [ ] Run `cargo test config` - should PASS (GREEN ✓)
 
