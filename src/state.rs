@@ -20,7 +20,9 @@ pub struct ElNodeState {
     pub is_primary: bool,
     /// Current block number reported by the node
     pub block_number: u64,
-    /// Whether the node is currently healthy
+    /// Whether the last health check succeeded (node was reachable)
+    pub check_ok: bool,
+    /// Whether the node is currently healthy (check_ok AND within lag threshold)
     pub is_healthy: bool,
     /// Current lag from chain head (in blocks)
     pub lag: u64,
@@ -35,6 +37,7 @@ impl ElNodeState {
             ws_url: node.ws_url.clone(),
             is_primary,
             block_number: 0,
+            check_ok: false, // Start with check not ok
             is_healthy: false, // Start unhealthy until health check passes
             lag: 0,
         }

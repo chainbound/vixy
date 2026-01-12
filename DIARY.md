@@ -30,6 +30,48 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 7: Health Monitor (TDD Complete)
+
+**What I did:**
+- **Tests**: Wrote 8 unit tests in src/monitor.rs:
+  - test_monitor_updates_el_node_state - verifies EL node state updated after health check
+  - test_monitor_updates_cl_node_state - verifies CL node state updated after health check
+  - test_monitor_calculates_chain_head - verifies max block number is chain head
+  - test_monitor_sets_failover_flag - failover activates when no primary healthy
+  - test_monitor_clears_failover_when_primary_recovers - failover deactivates on recovery
+  - test_monitor_runs_at_configured_interval - loop runs at correct interval
+  - test_el_node_marked_unhealthy_on_connection_failure - unreachable nodes marked unhealthy
+  - test_cl_node_marked_unhealthy_on_health_endpoint_failure - 503 means unhealthy
+
+- **Implementation**:
+  - run_health_check_cycle() - single pass checking all EL and CL nodes
+  - check_all_el_nodes() - check each EL node, update chain head, calculate health
+  - check_all_cl_nodes() - check each CL node, update chain head, calculate health
+  - update_failover_flag() - set/clear failover based on primary availability
+  - run_health_monitor() - infinite loop with configurable interval
+
+- **Refactoring**:
+  - Added `check_ok` field to ElNodeState to track if health check succeeded
+  - Updated calculate_el_health() to require check_ok AND lag within threshold
+  - Added test_el_node_unhealthy_when_check_fails test in el.rs
+
+**Challenges faced:**
+- Initial design only used lag for EL health, but unreachable nodes had lag=0 (block_number=0, chain_head=0)
+- This meant unreachable nodes were incorrectly marked healthy
+
+**How I solved it:**
+- Added `check_ok` field to ElNodeState (similar to `health_ok` in ClNodeState)
+- Changed health formula: is_healthy = check_ok AND lag <= max_lag
+- Now both EL and CL have the same dual-condition health model
+
+**What I learned:**
+- Both layers need to track "reachability" separately from "lag"
+- TDD caught this design flaw early - the failing test showed the edge case
+- wiremock's MockServer with no mocks mounted returns 404, which causes parse errors
+- Using Arc<AppState> with RwLock allows concurrent read/write in async context
+
+**Mood:** Productive - the monitor ties everything together, feels like real progress!
+
 ### 2026-01-12 - Phase 6: CL Health Check (TDD Complete)
 
 **What I did:**

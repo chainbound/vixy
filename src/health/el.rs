@@ -89,8 +89,8 @@ pub fn calculate_el_health(node: &mut ElNodeState, chain_head: u64, max_lag: u64
     // Calculate lag (how far behind the node is from chain head)
     node.lag = chain_head.saturating_sub(node.block_number);
 
-    // Node is healthy if lag is within the allowed threshold
-    node.is_healthy = node.lag <= max_lag;
+    // Node is healthy if check succeeded AND lag is within the allowed threshold
+    node.is_healthy = node.check_ok && node.lag <= max_lag;
 }
 
 #[cfg(test)]
@@ -201,13 +201,14 @@ mod tests {
     // calculate_el_lag / calculate_el_health tests
     // =========================================================================
 
-    fn make_el_node(name: &str, block_number: u64) -> ElNodeState {
+    fn make_el_node(name: &str, block_number: u64, check_ok: bool) -> ElNodeState {
         ElNodeState {
             name: name.to_string(),
             http_url: "http://localhost:8545".to_string(),
             ws_url: "ws://localhost:8546".to_string(),
             is_primary: true,
             block_number,
+            check_ok,
             is_healthy: false,
             lag: 0,
         }
@@ -215,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_calculate_el_lag() {
-        let mut node = make_el_node("test", 1000);
+        let mut node = make_el_node("test", 1000, true);
         let chain_head = 1005;
 
         calculate_el_health(&mut node, chain_head, 10);
@@ -225,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_el_node_healthy_within_lag() {
-        let mut node = make_el_node("test", 1000);
+        let mut node = make_el_node("test", 1000, true);
         let chain_head = 1002;
         let max_lag = 5;
 
@@ -233,14 +234,14 @@ mod tests {
 
         assert!(
             node.is_healthy,
-            "Node should be healthy when lag <= max_lag"
+            "Node should be healthy when check_ok AND lag <= max_lag"
         );
         assert_eq!(node.lag, 2);
     }
 
     #[test]
     fn test_el_node_unhealthy_exceeds_lag() {
-        let mut node = make_el_node("test", 990);
+        let mut node = make_el_node("test", 990, true);
         let chain_head = 1000;
         let max_lag = 5;
 
@@ -255,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_el_node_healthy_at_exact_max_lag() {
-        let mut node = make_el_node("test", 995);
+        let mut node = make_el_node("test", 995, true);
         let chain_head = 1000;
         let max_lag = 5;
 
@@ -263,9 +264,24 @@ mod tests {
 
         assert!(
             node.is_healthy,
-            "Node should be healthy when lag == max_lag"
+            "Node should be healthy when check_ok AND lag == max_lag"
         );
         assert_eq!(node.lag, 5);
+    }
+
+    #[test]
+    fn test_el_node_unhealthy_when_check_fails() {
+        let mut node = make_el_node("test", 1000, false); // check_ok = false
+        let chain_head = 1000;
+        let max_lag = 5;
+
+        calculate_el_health(&mut node, chain_head, max_lag);
+
+        assert!(
+            !node.is_healthy,
+            "Node should be unhealthy when check_ok is false"
+        );
+        assert_eq!(node.lag, 0);
     }
 
     // =========================================================================
@@ -275,9 +291,9 @@ mod tests {
     #[test]
     fn test_update_chain_head_finds_max() {
         let nodes = vec![
-            make_el_node("node1", 1000),
-            make_el_node("node2", 1005),
-            make_el_node("node3", 998),
+            make_el_node("node1", 1000, true),
+            make_el_node("node2", 1005, true),
+            make_el_node("node3", 998, true),
         ];
 
         let chain_head = update_el_chain_head(&nodes);
@@ -290,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_update_chain_head_single_node() {
-        let nodes = vec![make_el_node("node1", 1000)];
+        let nodes = vec![make_el_node("node1", 1000, true)];
 
         let chain_head = update_el_chain_head(&nodes);
 
