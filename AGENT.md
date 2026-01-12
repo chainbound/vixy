@@ -169,6 +169,10 @@ Reset `requests_this_second` every second using a background timer or sliding wi
   - Trigger on push/PR to main branch
   - Jobs: format check, clippy, unit tests (TDD), BDD tests (cucumber), build
   - Use rust caching for faster CI runs
+- [ ] Integrate Claude code review in CI `.github/workflows/claude-review.yml`:
+  - Trigger on pull requests
+  - Use Claude to review code changes and provide feedback
+  - Post review comments on the PR
 
 ### Phase 2: Setup BDD Infrastructure
 
