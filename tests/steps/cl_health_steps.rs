@@ -130,10 +130,7 @@ fn then_cl_node_healthy(world: &mut VixyWorld) {
     assert!(
         node.is_healthy,
         "Expected CL node '{}' to be healthy, but it was unhealthy (health_ok={}, lag={}, max_lag={})",
-        node.name,
-        node.health_ok,
-        node.lag,
-        world.max_cl_lag
+        node.name, node.health_ok, node.lag, world.max_cl_lag
     );
 }
 

@@ -2,9 +2,9 @@
 //!
 //! Contains the application state including EL/CL node states and chain head tracking.
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// State for an EL (Execution Layer) node

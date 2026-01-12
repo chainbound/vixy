@@ -1,13 +1,13 @@
 //! WebSocket proxy for EL subscriptions
 
-use axum::extract::ws::{Message, WebSocket};
 use axum::extract::State;
 use axum::extract::WebSocketUpgrade;
+use axum::extract::ws::{Message, WebSocket};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use tracing::{debug, error, info, warn};
 

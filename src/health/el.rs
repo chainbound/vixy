@@ -3,7 +3,7 @@
 //! Checks EL node health by calling eth_getBlockNumber and tracking chain head.
 
 use crate::state::ElNodeState;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
 /// JSON-RPC request structure

@@ -93,10 +93,7 @@ fn then_el_node_healthy(world: &mut VixyWorld) {
     assert!(
         node.is_healthy,
         "Expected EL node '{}' to be healthy, but it was unhealthy (check_ok={}, lag={}, max_lag={})",
-        node.name,
-        node.check_ok,
-        node.lag,
-        world.max_el_lag
+        node.name, node.check_ok, node.lag, world.max_el_lag
     );
 }
 

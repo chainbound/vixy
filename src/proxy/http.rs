@@ -1,13 +1,13 @@
 //! HTTP proxy handlers for EL and CL requests
 
+use axum::Json;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -266,9 +266,9 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRe
 mod tests {
     use super::*;
     use crate::state::{ClNodeState, ElNodeState};
+    use axum::Router;
     use axum::body::Body;
     use axum::http::Request;
-    use axum::Router;
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use tower::util::ServiceExt;

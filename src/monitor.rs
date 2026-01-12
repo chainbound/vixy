@@ -2,8 +2,8 @@
 //!
 //! Background task that periodically checks all EL and CL nodes and updates their health state.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tracing::{debug, info, warn};
@@ -71,30 +71,26 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     state.el_chain_head.store(chain_head, Ordering::SeqCst);
 
     // Second pass: calculate health for each node
-    let any_primary_healthy = {
-        let mut el_nodes = state.el_nodes.write().await;
-        let mut any_primary = false;
+    let mut el_nodes = state.el_nodes.write().await;
+    let mut any_primary_healthy = false;
 
-        for node in el_nodes.iter_mut() {
-            el::calculate_el_health(node, chain_head, state.max_el_lag);
+    for node in el_nodes.iter_mut() {
+        el::calculate_el_health(node, chain_head, state.max_el_lag);
 
-            if node.is_primary && node.is_healthy {
-                any_primary = true;
-            }
-
-            debug!(
-                node = %node.name,
-                is_primary = node.is_primary,
-                block_number = node.block_number,
-                check_ok = node.check_ok,
-                lag = node.lag,
-                is_healthy = node.is_healthy,
-                "EL node health calculated"
-            );
+        if node.is_primary && node.is_healthy {
+            any_primary_healthy = true;
         }
 
-        any_primary
-    };
+        debug!(
+            node = %node.name,
+            is_primary = node.is_primary,
+            block_number = node.block_number,
+            check_ok = node.check_ok,
+            lag = node.lag,
+            is_healthy = node.is_healthy,
+            "EL node health calculated"
+        );
+    }
 
     any_primary_healthy
 }
@@ -216,10 +212,12 @@ ws_url = "{url}""#
 
         let cl_nodes: Vec<String> = if cl_urls.is_empty() {
             // Add a dummy CL node if none provided (config requires at least one)
-            vec![r#"[[cl]]
+            vec![
+                r#"[[cl]]
 name = "dummy-cl"
 url = "http://localhost:5052""#
-                .to_string()]
+                    .to_string(),
+            ]
         } else {
             cl_urls
                 .iter()
@@ -286,10 +284,12 @@ ws_url = "{url}""#
 
         let cl_nodes: Vec<String> = if cl_urls.is_empty() {
             // Add a dummy CL node if none provided (config requires at least one)
-            vec![r#"[[cl]]
+            vec![
+                r#"[[cl]]
 name = "dummy-cl"
 url = "http://localhost:5052""#
-                .to_string()]
+                    .to_string(),
+            ]
         } else {
             cl_urls
                 .iter()

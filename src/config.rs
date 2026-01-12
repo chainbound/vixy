@@ -2,7 +2,7 @@
 //!
 //! Handles TOML config file parsing for EL/CL node definitions and global settings.
 
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use serde::Deserialize;
 
 /// Configuration error type
