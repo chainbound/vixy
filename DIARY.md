@@ -30,6 +30,42 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 4: State Management (TDD Complete)
+
+**What I did:**
+- **RED phase**: Wrote 6 unit tests in src/state.rs:
+  - test_el_node_state_from_config
+  - test_el_node_state_backup
+  - test_cl_node_state_from_config
+  - test_app_state_initialization
+  - test_initial_health_is_false
+  - test_primary_nodes_ordered_before_backup
+- Tests needed stub methods to compile (from_config), then failed with unimplemented!()
+
+- **GREEN phase**: Implemented the state management:
+  - ElNodeState::from_config() - creates EL node state with initial values
+  - ClNodeState::from_config() - creates CL node state with initial values
+  - AppState::new() - initializes full app state from config
+    - Primary EL nodes ordered before backup nodes
+    - All nodes start unhealthy (is_healthy = false)
+    - Chain heads start at 0
+    - Failover starts as inactive
+
+**Challenges faced:**
+- None significant - this phase was straightforward after config was working
+
+**How I solved it:**
+- Simple struct initialization with sensible defaults
+- Used Arc<RwLock<Vec<...>>> for thread-safe node state access
+- Used AtomicU64/AtomicBool for lock-free chain head and failover state
+
+**What I learned:**
+- TDD rhythm is becoming natural: write test -> compile error -> add stub -> run test -> fail -> implement -> pass
+- Separating primary/backup node ordering at state initialization simplifies failover logic later
+- Starting all nodes as unhealthy is the safe default - let health checks prove they're healthy
+
+**Mood:** Flowing - TDD cycle is getting faster and more natural!
+
 ### 2026-01-12 - Phase 3: Configuration (TDD Complete)
 
 **What I did:**
