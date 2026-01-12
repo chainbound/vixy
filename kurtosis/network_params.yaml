@@ -1,0 +1,69 @@
+# Kurtosis Ethereum Package Configuration for Vixy Integration Tests
+# This sets up a local Ethereum network with multiple EL and CL nodes
+#
+# Usage:
+#   kurtosis run github.com/ethpandaops/ethereum-package --args-file network_params.yaml
+#
+# Prerequisites:
+#   - Docker installed and running
+#   - Kurtosis CLI installed: https://docs.kurtosis.com/install/
+
+# Network participants - defines EL/CL pairs
+participants:
+  # Primary EL/CL pair (geth + lighthouse)
+  - el_type: geth
+    el_image: ethereum/client-go:latest
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:latest
+    count: 1
+    el_extra_labels:
+      vixy.role: primary
+    cl_extra_labels:
+      vixy.role: primary
+
+  # Secondary EL/CL pair (geth + prysm) - for failover testing
+  - el_type: geth
+    el_image: ethereum/client-go:latest
+    cl_type: prysm
+    cl_image: gcr.io/prysmaticlabs/prysm/beacon-chain:latest
+    count: 1
+    el_extra_labels:
+      vixy.role: secondary
+    cl_extra_labels:
+      vixy.role: secondary
+
+  # Third EL/CL pair (nethermind + teku) - for diversity testing
+  - el_type: nethermind
+    el_image: nethermind/nethermind:latest
+    cl_type: teku
+    cl_image: consensys/teku:latest
+    count: 1
+    el_extra_labels:
+      vixy.role: tertiary
+    cl_extra_labels:
+      vixy.role: tertiary
+
+# Network configuration
+network_params:
+  # Use minimal preset for faster block times (good for testing)
+  preset: minimal
+  # Faster slot time for quicker testing (default is 12s)
+  seconds_per_slot: 2
+  # Number of slots per epoch (minimal preset default)
+  slots_per_epoch: 8
+  # Genesis delay in seconds
+  genesis_delay: 20
+
+# Additional services
+additional_services:
+  # Dora block explorer (optional, useful for debugging)
+  - dora
+
+# Global configuration
+global_log_level: info
+
+# Port publishing for local access
+# Note: Kurtosis will assign ports dynamically, use `kurtosis enclave inspect` to find them
+port_publisher:
+  nat_exit_ip: "127.0.0.1"
+  public_port_start: 32000

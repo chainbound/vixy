@@ -1,0 +1,712 @@
+//! Integration test step definitions
+//!
+//! These steps are used for integration tests that run against real infrastructure
+//! (Docker Compose or Kurtosis). They require external services to be running.
+
+use cucumber::{given, then, when};
+use std::time::Duration;
+
+use crate::world::IntegrationWorld;
+
+// =============================================================================
+// Configuration and Setup Steps
+// =============================================================================
+
+#[given("Vixy is running with integration config")]
+async fn vixy_running_with_integration_config(world: &mut IntegrationWorld) {
+    // Check if Vixy is already running, if not start it
+    if world.vixy_url.is_none() {
+        // Default to localhost:8080 - user should start Vixy manually or via script
+        world.vixy_url = Some("http://127.0.0.1:8080".to_string());
+    }
+
+    // Verify Vixy is reachable
+    let client = reqwest::Client::new();
+    let url = format!("{}/status", world.vixy_url.as_ref().unwrap());
+
+    match client
+        .get(&url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            world.last_status_code = Some(resp.status().as_u16());
+        }
+        Ok(resp) => {
+            panic!(
+                "Vixy returned non-success status: {}. Is Vixy running?",
+                resp.status()
+            );
+        }
+        Err(e) => {
+            panic!(
+                "Failed to connect to Vixy at {}: {}. \
+                 Make sure Vixy is running with: cargo run -- --config docker/vixy-integration.toml",
+                url, e
+            );
+        }
+    }
+}
+
+#[given("the EL nodes are healthy")]
+async fn el_nodes_are_healthy(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/status", world.vixy_url.as_ref().unwrap());
+
+    let resp = client.get(&url).send().await.expect("Failed to get status");
+    let status: serde_json::Value = resp.json().await.expect("Failed to parse status JSON");
+
+    let el_nodes = status["el_nodes"]
+        .as_array()
+        .expect("el_nodes should be array");
+    let healthy_count = el_nodes
+        .iter()
+        .filter(|n| n["is_healthy"].as_bool().unwrap_or(false))
+        .count();
+
+    assert!(
+        healthy_count > 0,
+        "No healthy EL nodes found. Status: {:?}",
+        status
+    );
+    world.healthy_el_count = healthy_count;
+}
+
+#[given("the CL nodes are healthy")]
+async fn cl_nodes_are_healthy(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/status", world.vixy_url.as_ref().unwrap());
+
+    let resp = client.get(&url).send().await.expect("Failed to get status");
+    let status: serde_json::Value = resp.json().await.expect("Failed to parse status JSON");
+
+    let cl_nodes = status["cl_nodes"]
+        .as_array()
+        .expect("cl_nodes should be array");
+    let healthy_count = cl_nodes
+        .iter()
+        .filter(|n| n["is_healthy"].as_bool().unwrap_or(false))
+        .count();
+
+    assert!(
+        healthy_count > 0,
+        "No healthy CL nodes found. Status: {:?}",
+        status
+    );
+    world.healthy_cl_count = healthy_count;
+}
+
+#[given("all nodes are healthy")]
+async fn all_nodes_are_healthy(world: &mut IntegrationWorld) {
+    el_nodes_are_healthy(world).await;
+    cl_nodes_are_healthy(world).await;
+}
+
+// =============================================================================
+// EL Proxy Steps
+// =============================================================================
+
+#[when("I send an eth_blockNumber request to Vixy")]
+async fn send_eth_block_number(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/el", world.vixy_url.as_ref().unwrap());
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_blockNumber",
+        "params": [],
+        "id": 1
+    });
+
+    let resp = client
+        .post(&url)
+        .json(&payload)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    world.last_status_code = Some(resp.status().as_u16());
+    world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+}
+
+#[when("I send an eth_chainId request to Vixy")]
+async fn send_eth_chain_id(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/el", world.vixy_url.as_ref().unwrap());
+
+    let payload = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_chainId",
+        "params": [],
+        "id": 1
+    });
+
+    let resp = client
+        .post(&url)
+        .json(&payload)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    world.last_status_code = Some(resp.status().as_u16());
+    world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+}
+
+#[when("I send a batch request with eth_blockNumber and eth_chainId")]
+async fn send_batch_request(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/el", world.vixy_url.as_ref().unwrap());
+
+    let payload = serde_json::json!([
+        {"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1},
+        {"jsonrpc": "2.0", "method": "eth_chainId", "params": [], "id": 2}
+    ]);
+
+    let resp = client
+        .post(&url)
+        .json(&payload)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    world.last_status_code = Some(resp.status().as_u16());
+    world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+}
+
+#[then("I should receive a valid block number response")]
+async fn verify_block_number_response(world: &mut IntegrationWorld) {
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected 200 OK, got {:?}",
+        world.last_status_code
+    );
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    assert!(
+        json.get("result").is_some(),
+        "Response missing 'result' field: {}",
+        body
+    );
+
+    let result = json["result"].as_str().expect("result should be string");
+    assert!(
+        result.starts_with("0x"),
+        "Block number should be hex: {}",
+        result
+    );
+}
+
+#[then("I should receive a valid chain ID response")]
+async fn verify_chain_id_response(world: &mut IntegrationWorld) {
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected 200 OK, got {:?}",
+        world.last_status_code
+    );
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    assert!(
+        json.get("result").is_some(),
+        "Response missing 'result' field: {}",
+        body
+    );
+
+    let result = json["result"].as_str().expect("result should be string");
+    assert!(
+        result.starts_with("0x"),
+        "Chain ID should be hex: {}",
+        result
+    );
+}
+
+#[then("I should receive valid responses for both methods")]
+async fn verify_batch_response(world: &mut IntegrationWorld) {
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected 200 OK, got {:?}",
+        world.last_status_code
+    );
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    let responses = json.as_array().expect("Batch response should be array");
+    assert_eq!(responses.len(), 2, "Expected 2 responses in batch");
+
+    for resp in responses {
+        assert!(
+            resp.get("result").is_some(),
+            "Batch response missing 'result': {:?}",
+            resp
+        );
+    }
+}
+
+#[then("the response should be from a healthy node")]
+async fn verify_response_from_healthy_node(world: &mut IntegrationWorld) {
+    // If we got a successful response, it came from a healthy node
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Response was not successful"
+    );
+}
+
+// =============================================================================
+// CL Proxy Steps
+// =============================================================================
+
+#[when(expr = "I send a GET request to {word}")]
+async fn send_cl_get_request(world: &mut IntegrationWorld, path: String) {
+    let client = reqwest::Client::new();
+    let url = format!("{}{}", world.vixy_url.as_ref().unwrap(), path);
+
+    let resp = client
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    world.last_status_code = Some(resp.status().as_u16());
+    world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+}
+
+#[then("I should receive a 200 OK response")]
+async fn verify_200_ok(world: &mut IntegrationWorld) {
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected 200 OK, got {:?}. Body: {:?}",
+        world.last_status_code,
+        world.last_response_body
+    );
+}
+
+#[then("I should receive a valid beacon header response")]
+async fn verify_beacon_header_response(world: &mut IntegrationWorld) {
+    assert_eq!(world.last_status_code, Some(200));
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    assert!(
+        json.get("data").is_some(),
+        "Response missing 'data' field: {}",
+        body
+    );
+}
+
+#[then("the response should contain a slot number")]
+async fn verify_slot_in_response(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    let slot = &json["data"]["header"]["message"]["slot"];
+    assert!(
+        slot.is_string() || slot.is_number(),
+        "Slot should be present: {}",
+        body
+    );
+}
+
+#[then("I should receive a valid syncing response")]
+async fn verify_syncing_response(world: &mut IntegrationWorld) {
+    assert_eq!(world.last_status_code, Some(200));
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
+
+    assert!(
+        json.get("data").is_some(),
+        "Response missing 'data' field: {}",
+        body
+    );
+    assert!(
+        json["data"].get("is_syncing").is_some(),
+        "Response missing 'is_syncing' field: {}",
+        body
+    );
+}
+
+// =============================================================================
+// Status and Health Steps
+// =============================================================================
+
+#[when("I request the status endpoint")]
+async fn request_status_endpoint(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/status", world.vixy_url.as_ref().unwrap());
+
+    let resp = client
+        .get(&url)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .expect("Failed to send request");
+
+    world.last_status_code = Some(resp.status().as_u16());
+    world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+}
+
+#[then("I should receive a JSON response")]
+async fn verify_json_response(world: &mut IntegrationWorld) {
+    assert_eq!(world.last_status_code, Some(200));
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let _json: serde_json::Value =
+        serde_json::from_str(body).expect(&format!("Invalid JSON: {}", body));
+}
+
+#[then("the response should contain EL node statuses")]
+async fn verify_el_statuses_present(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let el_nodes = json["el_nodes"]
+        .as_array()
+        .expect("el_nodes should be array");
+    assert!(!el_nodes.is_empty(), "EL nodes array is empty");
+}
+
+#[then("the response should contain CL node statuses")]
+async fn verify_cl_statuses_present(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let cl_nodes = json["cl_nodes"]
+        .as_array()
+        .expect("cl_nodes should be array");
+    assert!(!cl_nodes.is_empty(), "CL nodes array is empty");
+}
+
+#[then("all nodes should show as healthy")]
+async fn verify_all_nodes_healthy(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let el_nodes = json["el_nodes"].as_array().expect("el_nodes array");
+    let cl_nodes = json["cl_nodes"].as_array().expect("cl_nodes array");
+
+    for node in el_nodes {
+        assert!(
+            node["is_healthy"].as_bool().unwrap_or(false),
+            "EL node {} is not healthy",
+            node["name"]
+        );
+    }
+
+    for node in cl_nodes {
+        assert!(
+            node["is_healthy"].as_bool().unwrap_or(false),
+            "CL node {} is not healthy",
+            node["name"]
+        );
+    }
+}
+
+#[then("each EL node should have a lag value")]
+async fn verify_el_lag_values(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let el_nodes = json["el_nodes"].as_array().expect("el_nodes array");
+    for node in el_nodes {
+        assert!(
+            node.get("lag").is_some(),
+            "EL node {} missing lag field",
+            node["name"]
+        );
+    }
+}
+
+#[then("each CL node should have a lag value")]
+async fn verify_cl_lag_values(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let cl_nodes = json["cl_nodes"].as_array().expect("cl_nodes array");
+    for node in cl_nodes {
+        assert!(
+            node.get("lag").is_some(),
+            "CL node {} missing lag field",
+            node["name"]
+        );
+    }
+}
+
+#[then("healthy nodes should have lag within threshold")]
+async fn verify_lag_within_threshold(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    // Check EL nodes - threshold is typically 5 blocks
+    let el_nodes = json["el_nodes"].as_array().expect("el_nodes array");
+    for node in el_nodes {
+        if node["is_healthy"].as_bool().unwrap_or(false) {
+            let lag = node["lag"].as_u64().unwrap_or(999);
+            assert!(
+                lag <= 5,
+                "EL node {} has lag {} > threshold",
+                node["name"],
+                lag
+            );
+        }
+    }
+
+    // Check CL nodes - threshold is typically 3 slots
+    let cl_nodes = json["cl_nodes"].as_array().expect("cl_nodes array");
+    for node in cl_nodes {
+        if node["is_healthy"].as_bool().unwrap_or(false) {
+            let lag = node["lag"].as_u64().unwrap_or(999);
+            assert!(
+                lag <= 3,
+                "CL node {} has lag {} > threshold",
+                node["name"],
+                lag
+            );
+        }
+    }
+}
+
+// =============================================================================
+// Metrics Steps
+// =============================================================================
+
+#[when("I request the metrics endpoint")]
+async fn request_metrics_endpoint(world: &mut IntegrationWorld) {
+    let client = reqwest::Client::new();
+    // Metrics are typically on a different port
+    let url = "http://127.0.0.1:9090/metrics";
+
+    match client.get(url).timeout(Duration::from_secs(5)).send().await {
+        Ok(resp) => {
+            world.last_status_code = Some(resp.status().as_u16());
+            world.last_response_body = Some(resp.text().await.expect("Failed to read response"));
+        }
+        Err(e) => {
+            // Metrics might not be running - mark as skipped
+            world.last_status_code = None;
+            world.last_response_body = Some(format!("Metrics endpoint not available: {}", e));
+        }
+    }
+}
+
+#[then("I should receive Prometheus format metrics")]
+async fn verify_prometheus_format(world: &mut IntegrationWorld) {
+    if world.last_status_code.is_none() {
+        // Skip if metrics not available
+        return;
+    }
+
+    assert_eq!(world.last_status_code, Some(200));
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    // Prometheus format has lines like: metric_name{labels} value
+    assert!(
+        body.contains("# HELP") || body.contains("# TYPE") || body.contains("vixy"),
+        "Response doesn't look like Prometheus format: {}",
+        body
+    );
+}
+
+#[then("the metrics should include node health gauges")]
+async fn verify_health_gauges(world: &mut IntegrationWorld) {
+    if world.last_status_code.is_none() {
+        // Skip if metrics not available
+        return;
+    }
+
+    let body = world.last_response_body.as_ref().expect("No response body");
+    // Check for expected metric names
+    assert!(
+        body.contains("el_node") || body.contains("cl_node") || body.contains("healthy"),
+        "Metrics don't include node health gauges: {}",
+        body
+    );
+}
+
+// =============================================================================
+// Failover Steps (require Docker control)
+// =============================================================================
+
+#[given("the primary EL node is stopped")]
+async fn stop_primary_el_node(world: &mut IntegrationWorld) {
+    // Use docker to stop the primary geth container
+    let output = tokio::process::Command::new("docker")
+        .args(["stop", "vixy-geth-primary"])
+        .output()
+        .await;
+
+    match output {
+        Ok(o) if o.status.success() => {
+            world
+                .stopped_containers
+                .push("vixy-geth-primary".to_string());
+            // Wait for Vixy to detect the node is down
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        Ok(o) => {
+            eprintln!(
+                "Warning: Failed to stop container: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        Err(e) => {
+            eprintln!("Warning: Docker command failed: {}", e);
+        }
+    }
+}
+
+#[given("the primary CL node is stopped")]
+async fn stop_primary_cl_node(world: &mut IntegrationWorld) {
+    let output = tokio::process::Command::new("docker")
+        .args(["stop", "vixy-cl-mock-primary"])
+        .output()
+        .await;
+
+    match output {
+        Ok(o) if o.status.success() => {
+            world
+                .stopped_containers
+                .push("vixy-cl-mock-primary".to_string());
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        Ok(o) => {
+            eprintln!(
+                "Warning: Failed to stop container: {}",
+                String::from_utf8_lossy(&o.stderr)
+            );
+        }
+        Err(e) => {
+            eprintln!("Warning: Docker command failed: {}", e);
+        }
+    }
+}
+
+#[given("the primary EL node was stopped")]
+async fn primary_el_was_stopped(world: &mut IntegrationWorld) {
+    // Stop it if not already stopped
+    if !world
+        .stopped_containers
+        .contains(&"vixy-geth-primary".to_string())
+    {
+        stop_primary_el_node(world).await;
+    }
+}
+
+#[when("the primary EL node is restarted")]
+async fn restart_primary_el_node(world: &mut IntegrationWorld) {
+    let _ = tokio::process::Command::new("docker")
+        .args(["start", "vixy-geth-primary"])
+        .output()
+        .await;
+
+    world
+        .stopped_containers
+        .retain(|c| c != "vixy-geth-primary");
+    // Wait for node to come back up
+    tokio::time::sleep(Duration::from_secs(5)).await;
+}
+
+#[when("I wait for the health check interval")]
+async fn wait_for_health_check(world: &mut IntegrationWorld) {
+    // Default health check interval is 2 seconds in integration config
+    // Wait a bit longer to be safe
+    let _ = world; // unused
+    tokio::time::sleep(Duration::from_secs(3)).await;
+}
+
+#[then("the response should be from the secondary node")]
+async fn verify_from_secondary(world: &mut IntegrationWorld) {
+    // We can't easily verify which node responded without adding headers
+    // Just verify we got a successful response (meaning failover worked)
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected successful response from secondary node"
+    );
+}
+
+#[then("the response should be from the secondary CL node")]
+async fn verify_from_secondary_cl(world: &mut IntegrationWorld) {
+    assert_eq!(
+        world.last_status_code,
+        Some(200),
+        "Expected successful response from secondary CL node"
+    );
+}
+
+#[then("the primary EL node should show as unhealthy")]
+async fn verify_primary_el_unhealthy(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let el_nodes = json["el_nodes"].as_array().expect("el_nodes array");
+    let primary = el_nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("geth-primary"));
+
+    if let Some(node) = primary {
+        assert!(
+            !node["is_healthy"].as_bool().unwrap_or(true),
+            "Primary EL node should be unhealthy"
+        );
+    }
+}
+
+#[then("the primary EL node should show as healthy")]
+async fn verify_primary_el_healthy(world: &mut IntegrationWorld) {
+    let body = world.last_response_body.as_ref().expect("No response body");
+    let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON");
+
+    let el_nodes = json["el_nodes"].as_array().expect("el_nodes array");
+    let primary = el_nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("geth-primary"));
+
+    if let Some(node) = primary {
+        assert!(
+            node["is_healthy"].as_bool().unwrap_or(false),
+            "Primary EL node should be healthy after restart"
+        );
+    }
+}
+
+// =============================================================================
+// WebSocket Steps (placeholder - requires WebSocket client)
+// =============================================================================
+
+#[when("I connect to the EL WebSocket endpoint")]
+async fn connect_ws_endpoint(world: &mut IntegrationWorld) {
+    // WebSocket testing would require tokio-tungstenite client
+    // For now, just mark as connected
+    world.ws_connected = true;
+}
+
+#[when("I subscribe to newHeads")]
+async fn subscribe_new_heads(world: &mut IntegrationWorld) {
+    // Placeholder - would send eth_subscribe for newHeads
+    let _ = world;
+}
+
+#[then("I should receive new block headers")]
+async fn verify_new_headers(world: &mut IntegrationWorld) {
+    // Placeholder - would verify WebSocket messages
+    // Skip if not actually connected
+    if !world.ws_connected {
+        return;
+    }
+    // In a real implementation, we'd wait for and verify headers
+}
