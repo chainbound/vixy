@@ -30,6 +30,39 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 5: EL Health Check (TDD Complete)
+
+**What I did:**
+- **RED phase**: Wrote 16 unit tests in src/health/el.rs:
+  - parse_hex_block_number tests (6 tests - with/without prefix, zero, large, invalid, empty)
+  - check_el_node tests (3 tests - success, timeout, invalid response) using wiremock
+  - calculate_el_health tests (4 tests - lag calculation, healthy within lag, unhealthy exceeds lag, exact max lag)
+  - update_el_chain_head tests (3 tests - finds max, single node, empty returns zero)
+- Created BDD feature file tests/features/el_health.feature
+
+- **GREEN phase**: Implemented EL health checking:
+  - parse_hex_block_number() - parses "0x..." or plain hex to u64
+  - check_el_node() - sends JSON-RPC eth_blockNumber request via reqwest
+  - update_el_chain_head() - finds maximum block number across nodes
+  - calculate_el_health() - sets lag and is_healthy based on chain head and max_lag
+
+**Challenges faced:**
+- Needed to design JSON-RPC request/response structs for eth_blockNumber
+- Wiremock integration for testing HTTP calls
+
+**How I solved it:**
+- Created simple JsonRpcRequest/JsonRpcResponse/JsonRpcError structs with serde
+- Used wiremock's body_json matcher to verify exact request structure
+- Used saturating_sub to safely calculate lag (avoids underflow if node ahead of chain head)
+
+**What I learned:**
+- Ethereum JSON-RPC uses hex strings for block numbers (0x prefix)
+- u64::from_str_radix(s, 16) cleanly parses hex to integer
+- wiremock is excellent for testing HTTP clients - can verify request bodies and mock responses
+- TDD with async tests works well with #[tokio::test]
+
+**Mood:** Confident - core health checking logic is solid!
+
 ### 2026-01-12 - Phase 4: State Management (TDD Complete)
 
 **What I did:**
