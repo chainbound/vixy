@@ -40,7 +40,7 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
 
 Example `config.toml`:
 ```toml
-[settings]
+[global]
 max_el_lag_blocks = 5
 max_cl_lag_slots = 3
 health_check_interval_ms = 1000
