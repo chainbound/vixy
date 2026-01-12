@@ -52,6 +52,9 @@ wiremock = "0.6"
 tokio-test = "0.4"
 futures = "0.3"
 
+# Tower for testing axum handlers
+tower = "0.5"
+
 [[test]]
 name = "cucumber"
 harness = false

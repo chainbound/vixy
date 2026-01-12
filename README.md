@@ -23,7 +23,7 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
 | 5 | EL Health Check | Completed |
 | 6 | CL Health Check | Completed |
 | 7 | Health Monitor | Completed |
-| 8 | Proxy Server | Not Started |
+| 8 | Proxy Server | Completed |
 | 9 | Main Entry Point | Not Started |
 | 10 | Metrics | Not Started |
 | 11 | Final Verification | Not Started |

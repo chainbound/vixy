@@ -30,6 +30,44 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-12 - Phase 8: Proxy Server (TDD Complete)
+
+**What I did:**
+- **Node Selection** (src/proxy/selection.rs):
+  - 9 unit tests for EL and CL node selection
+  - select_el_node() - prefers healthy primary, falls back to backup when failover active
+  - select_cl_node() - returns first healthy CL node
+
+- **HTTP Proxy** (src/proxy/http.rs):
+  - 5 unit tests for EL and CL HTTP proxying
+  - el_proxy_handler() - forwards POST requests to healthy EL node
+  - cl_proxy_handler() - forwards GET/POST requests with path preservation
+  - Returns 503 when no healthy node, 504 on timeout, 502 on upstream error
+
+- **WebSocket Proxy** (src/proxy/ws.rs):
+  - 2 unit tests for WS node selection
+  - el_ws_handler() - upgrades WebSocket and pipes bidirectionally to upstream
+  - Handles text, binary, ping, pong, close messages
+  - Uses tokio::select! for concurrent message forwarding
+
+**Challenges faced:**
+- axum 0.8 changed route wildcard syntax from `*path` to `{*path}`
+- Type conversions between tungstenite and axum WebSocket types (Utf8Bytes, Bytes)
+- Borrowed data across async boundaries in handlers
+
+**How I solved it:**
+- Updated route patterns to `{*path}` format
+- Used explicit type conversions: `text.as_str().into()`, `data.as_ref().to_vec().into()`
+- Extracted URL/name into local variables before async operations
+
+**What I learned:**
+- axum handlers need to release RwLock guards before async operations
+- tungstenite and axum have similar but incompatible types for WebSocket data
+- Testing WebSocket handlers with oneshot() has limitations due to HTTP upgrade requirements
+- tower::util::ServiceExt provides oneshot() for testing axum handlers
+
+**Mood:** Accomplished - the proxy is the core of Vixy and it works!
+
 ### 2026-01-12 - Phase 7: Health Monitor (TDD Complete)
 
 **What I did:**
