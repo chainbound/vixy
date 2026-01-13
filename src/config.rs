@@ -34,6 +34,26 @@ pub struct Global {
     pub max_retries: u32,
 }
 
+/// Metrics configuration settings
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Metrics {
+    /// Whether metrics are enabled
+    pub enabled: bool,
+    /// Port to serve metrics on (if separate from main server)
+    /// If None, metrics are served on the main server at /metrics
+    pub port: Option<u16>,
+}
+
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: None,
+        }
+    }
+}
+
 impl Default for Global {
     fn default() -> Self {
         Self {
@@ -123,6 +143,9 @@ pub struct Config {
     /// Global settings
     #[serde(default)]
     pub global: Global,
+    /// Metrics settings
+    #[serde(default)]
+    pub metrics: Metrics,
     /// EL node configuration
     pub el: El,
     /// CL nodes configuration

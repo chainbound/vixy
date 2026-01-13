@@ -12,24 +12,6 @@ A Rust proxy that monitors Ethereum Execution Layer (EL) and Consensus Layer (CL
 - WebSocket proxy for EL subscriptions
 - Prometheus metrics endpoint
 
-## Progress
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Project Setup | Completed |
-| 2 | BDD Infrastructure | Completed |
-| 3 | Configuration | Completed |
-| 4 | State Management | Completed |
-| 5 | EL Health Check | Completed |
-| 6 | CL Health Check | Completed |
-| 7 | Health Monitor | Completed |
-| 8 | Proxy Server | Completed |
-| 9 | Main Entry Point | Completed |
-| 10 | Metrics | Completed |
-| 11 | Final Verification | Completed |
-| 12 | Enhancements (Optional) | Completed |
-| 13 | Write the Story | Completed |
-
 ## Quick Start
 
 ```bash

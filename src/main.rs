@@ -71,11 +71,13 @@ async fn main() -> eyre::Result<()> {
 
     info!(interval_ms = monitor_interval, "Health monitor started");
 
-    // Initialize metrics (triggers lazy static initialization)
-    let _ = &*vixy::metrics::METRICS;
+    // Initialize metrics if enabled (triggers lazy static initialization)
+    if config.metrics.enabled {
+        let _ = &*vixy::metrics::METRICS;
+    }
 
-    // Build the router
-    let app = Router::new()
+    // Build the main router
+    let mut app = Router::new()
         // EL HTTP proxy (with and without trailing slash)
         .route("/el", axum::routing::post(http::el_proxy_handler))
         .route("/el/", axum::routing::post(http::el_proxy_handler))
@@ -90,12 +92,46 @@ async fn main() -> eyre::Result<()> {
         .route("/health", axum::routing::get(|| async { "OK" }))
         // Status endpoint - JSON view of all node states
         .route("/status", axum::routing::get(http::status_handler))
-        // Metrics endpoint for Prometheus
-        .route(
-            "/metrics",
-            axum::routing::get(|| async { VixyMetrics::render() }),
-        )
         .with_state(state);
+
+    // Handle metrics based on configuration
+    if config.metrics.enabled {
+        if let Some(metrics_port) = config.metrics.port {
+            // Spawn separate metrics server
+            let metrics_addr: SocketAddr =
+                format!("0.0.0.0:{metrics_port}").parse().map_err(|e| {
+                    error!(error = %e, "Invalid metrics port");
+                    eyre::eyre!("Invalid metrics port: {}", metrics_port)
+                })?;
+
+            tokio::spawn(async move {
+                let metrics_app = Router::new().route(
+                    "/metrics",
+                    axum::routing::get(|| async { VixyMetrics::render() }),
+                );
+
+                info!(addr = %metrics_addr, "Starting metrics server");
+
+                let listener = match tokio::net::TcpListener::bind(metrics_addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        error!(error = %e, "Failed to bind metrics server");
+                        return;
+                    }
+                };
+
+                if let Err(e) = axum::serve(listener, metrics_app).await {
+                    error!(error = %e, "Metrics server error");
+                }
+            });
+        } else {
+            // Serve metrics on the main server
+            app = app.route(
+                "/metrics",
+                axum::routing::get(|| async { VixyMetrics::render() }),
+            );
+        }
+    }
 
     // Parse listen address
     let addr: SocketAddr = args.listen.parse().map_err(|e| {

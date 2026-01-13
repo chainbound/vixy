@@ -17,6 +17,14 @@ proxy_timeout_ms = 30000
 # Maximum number of retry attempts for failed proxy requests
 max_retries = 2
 
+[metrics]
+# Enable or disable Prometheus metrics
+enabled = true
+
+# Optional: serve metrics on a separate port
+# If not set, metrics are served on the main server at /metrics
+# port = 9090
+
 [el]
 # Primary EL nodes - used by default
 [[el.primary]]
