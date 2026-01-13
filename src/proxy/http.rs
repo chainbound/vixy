@@ -74,14 +74,34 @@ pub async fn cl_proxy_handler(
 
     // Extract the path from the request (strip /cl prefix)
     let path = request.uri().path();
-    let cl_path = path.strip_prefix("/cl").unwrap_or(path);
+    let cl_path = path
+        .strip_prefix("/cl/")
+        .or_else(|| path.strip_prefix("/cl"))
+        .unwrap_or(path);
+    // Ensure path starts with / for proper URL construction
+    let cl_path = if cl_path.is_empty() || cl_path == "/" {
+        ""
+    } else if cl_path.starts_with('/') {
+        cl_path
+    } else {
+        // This shouldn't happen but handle it gracefully
+        cl_path
+    };
     let query = request
         .uri()
         .query()
         .map(|q| format!("?{q}"))
         .unwrap_or_default();
 
-    let full_url = format!("{}{}{}", target_url.trim_end_matches('/'), cl_path, query);
+    // Build full URL, ensuring proper slash handling
+    let base_url = target_url.trim_end_matches('/');
+    let full_url = if cl_path.is_empty() {
+        format!("{}{}", base_url, query)
+    } else if cl_path.starts_with('/') {
+        format!("{}{}{}", base_url, cl_path, query)
+    } else {
+        format!("{}/{}{}", base_url, cl_path, query)
+    };
 
     debug!(full_url, node_name, "Proxying CL request");
 
@@ -492,4 +512,113 @@ mod tests {
 
     // Note: timeout test is hard to implement without mocking the client
     // We've verified the timeout handling code is in place
+
+    // =========================================================================
+    // Trailing slash tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_el_proxy_with_trailing_slash() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": "0x123",
+                "id": 1
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let el_nodes = vec![make_el_node("geth-1", &mock_server.uri(), true)];
+        let state = create_test_state(el_nodes, vec![]);
+
+        let app = Router::new()
+            .route("/el", axum::routing::post(el_proxy_handler))
+            .route("/el/", axum::routing::post(el_proxy_handler))
+            .with_state(state);
+
+        // Test with trailing slash
+        let request = Request::builder()
+            .method("POST")
+            .uri("/el/")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_cl_proxy_with_trailing_slash_base() {
+        let mock_server = MockServer::start().await;
+
+        // The path should be /eth/v1/beacon/genesis when called via /cl/eth/v1/beacon/genesis
+        Mock::given(method("GET"))
+            .and(path("/eth/v1/beacon/genesis"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "genesis_time": "1234567890"
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cl_nodes = vec![make_cl_node("lighthouse-1", &mock_server.uri(), true)];
+        let state = create_test_state(vec![], cl_nodes);
+
+        let app = Router::new()
+            .route("/cl", axum::routing::any(cl_proxy_handler))
+            .route("/cl/", axum::routing::any(cl_proxy_handler))
+            .route("/cl/{*path}", axum::routing::any(cl_proxy_handler))
+            .with_state(state);
+
+        // Test /cl/ + eth/v1/beacon/genesis (simulating mk1's URL joining)
+        let request = Request::builder()
+            .method("GET")
+            .uri("/cl/eth/v1/beacon/genesis")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["data"]["genesis_time"], "1234567890");
+    }
+
+    #[tokio::test]
+    async fn test_cl_proxy_bare_cl_path() {
+        let mock_server = MockServer::start().await;
+
+        // Mock the root path
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+            .mount(&mock_server)
+            .await;
+
+        let cl_nodes = vec![make_cl_node("lighthouse-1", &mock_server.uri(), true)];
+        let state = create_test_state(vec![], cl_nodes);
+
+        let app = Router::new()
+            .route("/cl", axum::routing::any(cl_proxy_handler))
+            .route("/cl/", axum::routing::any(cl_proxy_handler))
+            .with_state(state);
+
+        // Test bare /cl
+        let request = Request::builder()
+            .method("GET")
+            .uri("/cl")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        // Should either succeed or return 404 from upstream (not 503)
+        assert_ne!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 }

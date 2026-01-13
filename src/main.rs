@@ -77,11 +77,15 @@ async fn main() -> eyre::Result<()> {
 
     // Build the router
     let app = Router::new()
-        // EL HTTP proxy
+        // EL HTTP proxy (with and without trailing slash)
         .route("/el", axum::routing::post(http::el_proxy_handler))
-        // EL WebSocket proxy
+        .route("/el/", axum::routing::post(http::el_proxy_handler))
+        // EL WebSocket proxy (with and without trailing slash)
         .route("/el/ws", axum::routing::get(ws::el_ws_handler))
-        // CL HTTP proxy (all paths under /cl/)
+        .route("/el/ws/", axum::routing::get(ws::el_ws_handler))
+        // CL HTTP proxy (all paths under /cl/, including bare /cl and /cl/)
+        .route("/cl", axum::routing::any(http::cl_proxy_handler))
+        .route("/cl/", axum::routing::any(http::cl_proxy_handler))
         .route("/cl/{*path}", axum::routing::any(http::cl_proxy_handler))
         // Health endpoint for the proxy itself
         .route("/health", axum::routing::get(|| async { "OK" }))
