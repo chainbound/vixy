@@ -96,11 +96,11 @@ pub async fn cl_proxy_handler(
     // Build full URL, ensuring proper slash handling
     let base_url = target_url.trim_end_matches('/');
     let full_url = if cl_path.is_empty() {
-        format!("{}{}", base_url, query)
+        format!("{base_url}{query}")
     } else if cl_path.starts_with('/') {
-        format!("{}{}{}", base_url, cl_path, query)
+        format!("{base_url}{cl_path}{query}")
     } else {
-        format!("{}/{}{}", base_url, cl_path, query)
+        format!("{base_url}/{cl_path}{query}")
     };
 
     debug!(full_url, node_name, "Proxying CL request");
@@ -543,7 +543,9 @@ mod tests {
             .method("POST")
             .uri("/el/")
             .header("content-type", "application/json")
-            .body(Body::from(r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#))
+            .body(Body::from(
+                r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#,
+            ))
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();

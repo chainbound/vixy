@@ -2,9 +2,9 @@
 //!
 //! Provides metrics collection and exposition for monitoring Vixy health and performance.
 
+use prometheus::TextEncoder;
 use prometric::{Counter, Gauge, Histogram};
 use prometric_derive::metrics;
-use prometheus::TextEncoder;
 use std::sync::LazyLock;
 
 /// Vixy metrics collector using prometric derive macro
@@ -108,7 +108,9 @@ impl VixyMetrics {
 
     /// Record EL request duration
     pub fn observe_el_duration(node: &str, tier: &str, duration_secs: f64) {
-        METRICS.el_request_duration(node, tier).observe(duration_secs);
+        METRICS
+            .el_request_duration(node, tier)
+            .observe(duration_secs);
     }
 
     /// Set EL node block number
@@ -123,12 +125,16 @@ impl VixyMetrics {
 
     /// Set EL node health status (1 = healthy, 0 = unhealthy)
     pub fn set_el_healthy(node: &str, tier: &str, healthy: bool) {
-        METRICS.el_healthy(node, tier).set(if healthy { 1u64 } else { 0u64 });
+        METRICS
+            .el_healthy(node, tier)
+            .set(if healthy { 1u64 } else { 0u64 });
     }
 
     /// Set EL failover active status
     pub fn set_el_failover_active(active: bool) {
-        METRICS.el_failover_active().set(if active { 1u64 } else { 0u64 });
+        METRICS
+            .el_failover_active()
+            .set(if active { 1u64 } else { 0u64 });
     }
 
     /// Increment EL failover counter
@@ -172,7 +178,9 @@ impl VixyMetrics {
 
     /// Set CL node health status (1 = healthy, 0 = unhealthy)
     pub fn set_cl_healthy(node: &str, healthy: bool) {
-        METRICS.cl_healthy(node).set(if healthy { 1u64 } else { 0u64 });
+        METRICS
+            .cl_healthy(node)
+            .set(if healthy { 1u64 } else { 0u64 });
     }
 
     /// Set CL chain head
