@@ -1,0 +1,30 @@
+# Build artifacts
+target/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+tests/
+
+# Kurtosis test configs
+kurtosis/
+
+# Scripts
+scripts/
+
+# Claude config
+.claude/
+
+# GitHub Actions
+.github/
