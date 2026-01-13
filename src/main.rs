@@ -71,9 +71,8 @@ async fn main() -> eyre::Result<()> {
 
     info!(interval_ms = monitor_interval, "Health monitor started");
 
-    // Initialize metrics
-    let metrics = Arc::new(VixyMetrics::new());
-    let metrics_for_handler = metrics.clone();
+    // Initialize metrics (triggers lazy static initialization)
+    let _ = &*vixy::metrics::METRICS;
 
     // Build the router
     let app = Router::new()
@@ -94,10 +93,7 @@ async fn main() -> eyre::Result<()> {
         // Metrics endpoint for Prometheus
         .route(
             "/metrics",
-            axum::routing::get(move || {
-                let metrics = metrics_for_handler.clone();
-                async move { metrics.render() }
-            }),
+            axum::routing::get(|| async { VixyMetrics::render() }),
         )
         .with_state(state);
 
