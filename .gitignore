@@ -2,3 +2,5 @@
 
 .claude/settings.local.json
 
+# Generated Kurtosis config (created by setup-kurtosis.sh)
+kurtosis/vixy-kurtosis.toml

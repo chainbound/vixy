@@ -128,7 +128,7 @@ Failover logic:
 > This log will be used to create a documentary of the development journey. Write in first person, be honest about struggles, and capture the human (or AI) side of building software.
 
 ### Phase 1: Project Setup
-- [ ] Add dependencies to Cargo.toml:
+- [x] Add dependencies to Cargo.toml:
   - `tokio` (async runtime with full features)
   - `axum` (HTTP server for proxy)
   - `reqwest` (HTTP client for health checks)
@@ -139,11 +139,11 @@ Failover logic:
   - `tokio-tungstenite` (WebSocket client for EL WS proxy)
   - `futures-util` (for stream handling with WebSocket)
   - `prometric` (Prometheus metrics - https://github.com/chainbound/prometric)
-- [ ] Add dev-dependencies to Cargo.toml:
+- [x] Add dev-dependencies to Cargo.toml:
   - `cucumber` (BDD testing framework)
   - `wiremock` (mock HTTP server for testing)
   - `tokio-test` (async test utilities)
-- [ ] Create minimal stub files so tests can compile (but fail):
+- [x] Create minimal stub files so tests can compile (but fail):
   - `src/lib.rs` (expose modules)
   - `src/config.rs` (empty structs)
   - `src/state.rs` (empty structs)
@@ -151,7 +151,7 @@ Failover logic:
   - `src/proxy/mod.rs`, `selection.rs`, `http.rs`, `ws.rs` (empty functions)
   - `src/monitor.rs` (empty function)
   - `src/metrics.rs` (empty struct)
-- [ ] Create `justfile` for common development commands:
+- [x] Create `justfile` for common development commands:
   - `fmt` - format code
   - `fmt-check` - check formatting without modifying
   - `clippy` - run clippy lints
@@ -159,11 +159,11 @@ Failover logic:
   - `test-bdd` - run BDD tests (cucumber)
   - `test-all` - run both TDD and BDD tests
   - `ci` - run full CI checks (fmt-check, clippy, test-all)
-- [ ] Create GitHub Actions CI workflow `.github/workflows/ci.yml`:
+- [x] Create GitHub Actions CI workflow `.github/workflows/ci.yml`:
   - Trigger on push/PR to main branch
   - Jobs: format check, clippy, unit tests (TDD), BDD tests (cucumber), build
   - Use rust caching for faster CI runs
-- [ ] Integrate Claude code review in CI `.github/workflows/claude-review.yml`:
+- [x] Integrate Claude code review in CI `.github/workflows/claude-review.yml`:
   - Trigger on pull requests
   - Use Claude to review code changes and provide feedback
   - Post review comments on the PR
@@ -172,9 +172,9 @@ Failover logic:
 
 > Setup the test infrastructure that will be used throughout development.
 
-- [ ] Setup BDD test infrastructure:
-  - [ ] Create `tests/cucumber.rs` as test harness
-  - [ ] Create `tests/world.rs` with `VixyWorld` struct:
+- [x] Setup BDD test infrastructure:
+  - [x] Create `tests/cucumber.rs` as test harness
+  - [x] Create `tests/world.rs` with `VixyWorld` struct:
     ```rust
     #[derive(Debug, Default, World)]
     pub struct VixyWorld {
@@ -187,8 +187,8 @@ Failover logic:
         pub last_error: Option<String>,
     }
     ```
-  - [ ] Configure `[[test]]` in Cargo.toml for cucumber
-  - [ ] Create `tests/steps/mod.rs` for step definitions
+  - [x] Configure `[[test]]` in Cargo.toml for cucumber
+  - [x] Create `tests/steps/mod.rs` for step definitions
 
 **Testing Philosophy:**
 ```
@@ -225,26 +225,26 @@ Failover logic:
 #### 3.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 3.2
 
-- [ ] Write BDD feature `tests/features/config.feature` (scenarios for valid config, missing fields, etc.)
-- [ ] Write step definitions in `tests/steps/config_steps.rs`
-- [ ] Write unit tests in `src/config.rs` `#[cfg(test)]` module:
-  - [ ] `test_parse_valid_config`
-  - [ ] `test_parse_config_missing_el_fails`
-  - [ ] `test_parse_config_missing_cl_fails`
-  - [ ] `test_parse_config_invalid_url_fails`
-  - [ ] `test_default_values_applied`
-- [ ] Create stub structs/functions so tests compile (use `unimplemented!()`)
-- [ ] Run `cargo test config` - verify tests FAIL (RED ✗)
+- [x] Write BDD feature `tests/features/config.feature` (scenarios for valid config, missing fields, etc.)
+- [x] Write step definitions in `tests/steps/config_steps.rs`
+- [x] Write unit tests in `src/config.rs` `#[cfg(test)]` module:
+  - [x] `test_parse_valid_config`
+  - [x] `test_parse_config_missing_el_fails`
+  - [x] `test_parse_config_missing_cl_fails`
+  - [x] `test_parse_config_invalid_url_fails`
+  - [x] `test_default_values_applied`
+- [x] Create stub structs/functions so tests compile (use `unimplemented!()`)
+- [x] Run `cargo test config` - verify tests FAIL (RED ✗)
 
 #### 3.2 Implement (GREEN)
-- [ ] Implement `src/config.rs`:
-  - [ ] `Config` struct with `Global`, `El`, `Vec<Cl>`
-  - [ ] `Global` struct with `max_el_lag_blocks`, `max_cl_lag_slots`, `health_check_interval_ms`
-  - [ ] `El` struct with `primary: Vec<ElNode>`, `backup: Vec<ElNode>`
-  - [ ] `ElNode` struct with `name`, `http_url`, `ws_url`
-  - [ ] `Cl` struct with `name`, `url`
-  - [ ] `Config::load(path)` and `Config::from_str(s)` to parse TOML
-- [ ] Run `cargo test config` - should PASS (GREEN ✓)
+- [x] Implement `src/config.rs`:
+  - [x] `Config` struct with `Global`, `El`, `Vec<Cl>`
+  - [x] `Global` struct with `max_el_lag_blocks`, `max_cl_lag_slots`, `health_check_interval_ms`
+  - [x] `El` struct with `primary: Vec<ElNode>`, `backup: Vec<ElNode>`
+  - [x] `ElNode` struct with `name`, `http_url`, `ws_url`
+  - [x] `Cl` struct with `name`, `url`
+  - [x] `Config::load(path)` and `Config::from_str(s)` to parse TOML
+- [x] Run `cargo test config` - should PASS (GREEN ✓)
 
 ---
 
@@ -253,20 +253,20 @@ Failover logic:
 #### 4.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 4.2
 
-- [ ] Write unit tests in `src/state.rs` `#[cfg(test)]` module:
-  - [ ] `test_el_node_state_from_config`
-  - [ ] `test_cl_node_state_from_config`
-  - [ ] `test_app_state_initialization`
-  - [ ] `test_initial_health_is_false`
-- [ ] Create stub structs so tests compile
-- [ ] Run `cargo test state` - verify tests FAIL (RED ✗)
+- [x] Write unit tests in `src/state.rs` `#[cfg(test)]` module:
+  - [x] `test_el_node_state_from_config`
+  - [x] `test_cl_node_state_from_config`
+  - [x] `test_app_state_initialization`
+  - [x] `test_initial_health_is_false`
+- [x] Create stub structs so tests compile
+- [x] Run `cargo test state` - verify tests FAIL (RED ✗)
 
 #### 4.2 Implement (GREEN)
-- [ ] Implement `src/state.rs`:
-  - [ ] `ElNodeState` struct (name, urls, block_number, is_healthy, lag)
-  - [ ] `ClNodeState` struct (name, url, slot, health_ok, is_healthy, lag)
-  - [ ] `AppState` struct (Arc<RwLock<Vec<...>>> for nodes, AtomicU64 for chain heads, AtomicBool for failover)
-- [ ] Run `cargo test state` - should PASS (GREEN ✓)
+- [x] Implement `src/state.rs`:
+  - [x] `ElNodeState` struct (name, urls, block_number, is_healthy, lag)
+  - [x] `ClNodeState` struct (name, url, slot, health_ok, is_healthy, lag)
+  - [x] `AppState` struct (Arc<RwLock<Vec<...>>> for nodes, AtomicU64 for chain heads, AtomicBool for failover)
+- [x] Run `cargo test state` - should PASS (GREEN ✓)
 
 ---
 
@@ -275,29 +275,29 @@ Failover logic:
 #### 5.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 5.2
 
-- [ ] Write BDD feature `tests/features/el_health.feature` (healthy node, lagging node, unreachable node)
-- [ ] Write step definitions in `tests/steps/el_health_steps.rs`
-- [ ] Write unit tests in `src/health/el.rs` `#[cfg(test)]` module:
-  - [ ] `test_parse_hex_block_number` (with and without 0x prefix)
-  - [ ] `test_parse_hex_block_number_invalid`
-  - [ ] `test_check_el_node_success` (use wiremock)
-  - [ ] `test_check_el_node_timeout`
-  - [ ] `test_check_el_node_invalid_response`
-  - [ ] `test_calculate_el_lag`
-  - [ ] `test_el_node_healthy_within_lag`
-  - [ ] `test_el_node_unhealthy_exceeds_lag`
-  - [ ] `test_update_chain_head_finds_max`
-- [ ] Create stub functions so tests compile
-- [ ] Run `cargo test el` - verify tests FAIL (RED ✗)
+- [x] Write BDD feature `tests/features/el_health.feature` (healthy node, lagging node, unreachable node)
+- [x] Write step definitions in `tests/steps/el_health_steps.rs`
+- [x] Write unit tests in `src/health/el.rs` `#[cfg(test)]` module:
+  - [x] `test_parse_hex_block_number` (with and without 0x prefix)
+  - [x] `test_parse_hex_block_number_invalid`
+  - [x] `test_check_el_node_success` (use wiremock)
+  - [x] `test_check_el_node_timeout`
+  - [x] `test_check_el_node_invalid_response`
+  - [x] `test_calculate_el_lag`
+  - [x] `test_el_node_healthy_within_lag`
+  - [x] `test_el_node_unhealthy_exceeds_lag`
+  - [x] `test_update_chain_head_finds_max`
+- [x] Create stub functions so tests compile
+- [x] Run `cargo test el` - verify tests FAIL (RED ✗)
 
 #### 5.2 Implement (GREEN)
-- [ ] Implement `src/health/mod.rs` (module definition)
-- [ ] Implement `src/health/el.rs`:
-  - [ ] `parse_hex_block_number(hex: &str) -> Result<u64>`
-  - [ ] `check_el_node(url: &str) -> Result<u64>`
-  - [ ] `update_el_chain_head(nodes: &[ElNodeState]) -> u64`
-  - [ ] `calculate_el_health(node: &mut ElNodeState, chain_head: u64, max_lag: u64)`
-- [ ] Run `cargo test el` - should PASS (GREEN ✓)
+- [x] Implement `src/health/mod.rs` (module definition)
+- [x] Implement `src/health/el.rs`:
+  - [x] `parse_hex_block_number(hex: &str) -> Result<u64>`
+  - [x] `check_el_node(url: &str) -> Result<u64>`
+  - [x] `update_el_chain_head(nodes: &[ElNodeState]) -> u64`
+  - [x] `calculate_el_health(node: &mut ElNodeState, chain_head: u64, max_lag: u64)`
+- [x] Run `cargo test el` - should PASS (GREEN ✓)
 
 ---
 
@@ -306,28 +306,28 @@ Failover logic:
 #### 6.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 6.2
 
-- [ ] Write BDD feature `tests/features/cl_health.feature` (healthy, health endpoint fails, lagging)
-- [ ] Write step definitions in `tests/steps/cl_health_steps.rs`
-- [ ] Write unit tests in `src/health/cl.rs` `#[cfg(test)]` module:
-  - [ ] `test_check_cl_health_returns_true_on_200`
-  - [ ] `test_check_cl_health_returns_false_on_503`
-  - [ ] `test_check_cl_slot_parses_json`
-  - [ ] `test_check_cl_slot_invalid_json`
-  - [ ] `test_calculate_cl_lag`
-  - [ ] `test_cl_node_unhealthy_when_health_fails`
-  - [ ] `test_cl_node_unhealthy_when_lagging`
-  - [ ] `test_cl_node_healthy_when_both_pass`
-- [ ] Create stub functions
-- [ ] Run `cargo test cl` - verify tests FAIL (RED ✗)
+- [x] Write BDD feature `tests/features/cl_health.feature` (healthy, health endpoint fails, lagging)
+- [x] Write step definitions in `tests/steps/cl_health_steps.rs`
+- [x] Write unit tests in `src/health/cl.rs` `#[cfg(test)]` module:
+  - [x] `test_check_cl_health_returns_true_on_200`
+  - [x] `test_check_cl_health_returns_false_on_503`
+  - [x] `test_check_cl_slot_parses_json`
+  - [x] `test_check_cl_slot_invalid_json`
+  - [x] `test_calculate_cl_lag`
+  - [x] `test_cl_node_unhealthy_when_health_fails`
+  - [x] `test_cl_node_unhealthy_when_lagging`
+  - [x] `test_cl_node_healthy_when_both_pass`
+- [x] Create stub functions
+- [x] Run `cargo test cl` - verify tests FAIL (RED ✗)
 
 #### 6.2 Implement (GREEN)
-- [ ] Implement `src/health/cl.rs`:
-  - [ ] `check_cl_health(url: &str) -> Result<bool>`
-  - [ ] `check_cl_slot(url: &str) -> Result<u64>`
-  - [ ] `check_cl_node(url: &str) -> Result<(bool, u64)>`
-  - [ ] `update_cl_chain_head(nodes: &[ClNodeState]) -> u64`
-  - [ ] `calculate_cl_health(node: &mut ClNodeState, chain_head: u64, max_lag: u64)`
-- [ ] Run `cargo test cl` - should PASS (GREEN ✓)
+- [x] Implement `src/health/cl.rs`:
+  - [x] `check_cl_health(url: &str) -> Result<bool>`
+  - [x] `check_cl_slot(url: &str) -> Result<u64>`
+  - [x] `check_cl_node(url: &str) -> Result<(bool, u64)>`
+  - [x] `update_cl_chain_head(nodes: &[ClNodeState]) -> u64`
+  - [x] `calculate_cl_health(node: &mut ClNodeState, chain_head: u64, max_lag: u64)`
+- [x] Run `cargo test cl` - should PASS (GREEN ✓)
 
 ---
 
@@ -336,21 +336,21 @@ Failover logic:
 #### 7.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 7.2
 
-- [ ] Write unit tests in `src/monitor.rs` `#[cfg(test)]` module:
-  - [ ] `test_monitor_updates_el_node_state`
-  - [ ] `test_monitor_updates_cl_node_state`
-  - [ ] `test_monitor_calculates_chain_head`
-  - [ ] `test_monitor_sets_failover_flag`
-  - [ ] `test_monitor_clears_failover_when_primary_recovers`
-  - [ ] `test_monitor_runs_at_configured_interval`
-- [ ] Create stub functions
-- [ ] Run `cargo test monitor` - verify tests FAIL (RED ✗)
+- [x] Write unit tests in `src/monitor.rs` `#[cfg(test)]` module:
+  - [x] `test_monitor_updates_el_node_state`
+  - [x] `test_monitor_updates_cl_node_state`
+  - [x] `test_monitor_calculates_chain_head`
+  - [x] `test_monitor_sets_failover_flag`
+  - [x] `test_monitor_clears_failover_when_primary_recovers`
+  - [x] `test_monitor_runs_at_configured_interval`
+- [x] Create stub functions
+- [x] Run `cargo test monitor` - verify tests FAIL (RED ✗)
 
 #### 7.2 Implement (GREEN)
-- [ ] Implement `src/monitor.rs`:
-  - [ ] `run_health_monitor(state: AppState)` - async loop checking all nodes
-  - [ ] Update chain heads, recalculate health, manage failover flag, log changes
-- [ ] Run `cargo test monitor` - should PASS (GREEN ✓)
+- [x] Implement `src/monitor.rs`:
+  - [x] `run_health_monitor(state: AppState)` - async loop checking all nodes
+  - [x] Update chain heads, recalculate health, manage failover flag, log changes
+- [x] Run `cargo test monitor` - should PASS (GREEN ✓)
 
 ---
 
@@ -359,50 +359,50 @@ Failover logic:
 #### 8.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 8.2
 
-- [ ] Write BDD features:
-  - [ ] `tests/features/el_failover.feature` (primary preference, backup failover, recovery)
-  - [ ] `tests/features/proxy_http.feature` (forward requests, 503 on no healthy)
-  - [ ] `tests/features/proxy_ws.feature` (establish connection, bidirectional, reconnect)
-- [ ] Write step definitions in `tests/steps/` (failover, proxy)
-- [ ] Write unit tests for `src/proxy/selection.rs`:
-  - [ ] `test_select_healthy_node_from_list`
-  - [ ] `test_select_skips_unhealthy_nodes`
-  - [ ] `test_select_primary_before_backup`
-  - [ ] `test_select_backup_when_no_primary_available`
-  - [ ] `test_select_returns_none_when_all_unavailable`
-- [ ] Write unit tests for `src/proxy/http.rs`:
-  - [ ] `test_el_proxy_forwards_request`
-  - [ ] `test_el_proxy_returns_503_no_healthy_nodes`
-  - [ ] `test_cl_proxy_forwards_get_request`
-  - [ ] `test_cl_proxy_preserves_path`
-  - [ ] `test_proxy_timeout_returns_504`
-- [ ] Write unit tests for `src/proxy/ws.rs`:
-  - [ ] `test_ws_upgrade_success`
-  - [ ] `test_ws_message_forwarded_upstream`
-  - [ ] `test_ws_message_forwarded_downstream`
-  - [ ] `test_ws_client_disconnect_closes_upstream`
-  - [ ] `test_ws_no_healthy_node_returns_503`
-- [ ] Create stub functions
-- [ ] Run `cargo test proxy` - verify tests FAIL (RED ✗)
+- [x] Write BDD features:
+  - [x] `tests/features/el_failover.feature` (primary preference, backup failover, recovery)
+  - [x] `tests/features/proxy_http.feature` (forward requests, 503 on no healthy)
+  - [x] `tests/features/proxy_ws.feature` (establish connection, bidirectional, reconnect)
+- [x] Write step definitions in `tests/steps/` (failover, proxy)
+- [x] Write unit tests for `src/proxy/selection.rs`:
+  - [x] `test_select_healthy_node_from_list`
+  - [x] `test_select_skips_unhealthy_nodes`
+  - [x] `test_select_primary_before_backup`
+  - [x] `test_select_backup_when_no_primary_available`
+  - [x] `test_select_returns_none_when_all_unavailable`
+- [x] Write unit tests for `src/proxy/http.rs`:
+  - [x] `test_el_proxy_forwards_request`
+  - [x] `test_el_proxy_returns_503_no_healthy_nodes`
+  - [x] `test_cl_proxy_forwards_get_request`
+  - [x] `test_cl_proxy_preserves_path`
+  - [x] `test_proxy_timeout_returns_504`
+- [x] Write unit tests for `src/proxy/ws.rs`:
+  - [x] `test_ws_upgrade_success`
+  - [x] `test_ws_message_forwarded_upstream`
+  - [x] `test_ws_message_forwarded_downstream`
+  - [x] `test_ws_client_disconnect_closes_upstream`
+  - [x] `test_ws_no_healthy_node_returns_503`
+- [x] Create stub functions
+- [x] Run `cargo test proxy` - verify tests FAIL (RED ✗)
 
 #### 8.2 Implement (GREEN)
-- [ ] Implement `src/proxy/mod.rs`
-- [ ] Implement `src/proxy/selection.rs` (node selection with failover)
-- [ ] Implement `src/proxy/http.rs` (EL and CL HTTP handlers)
-- [ ] Implement `src/proxy/ws.rs` (WebSocket upgrade and bidirectional piping)
-- [ ] Run `cargo test proxy` - should PASS (GREEN ✓)
-- [ ] Run `cargo test --test cucumber` - BDD tests should PASS ✓
+- [x] Implement `src/proxy/mod.rs`
+- [x] Implement `src/proxy/selection.rs` (node selection with failover)
+- [x] Implement `src/proxy/http.rs` (EL and CL HTTP handlers)
+- [x] Implement `src/proxy/ws.rs` (WebSocket upgrade and bidirectional piping)
+- [x] Run `cargo test proxy` - should PASS (GREEN ✓)
+- [x] Run `cargo test --test cucumber` - BDD tests should PASS ✓
 
 ---
 
 ### Phase 9: Main Entry Point
 
-- [ ] Implement `src/main.rs`:
-  - [ ] Parse CLI args for config path
-  - [ ] Load config, initialize AppState and metrics
-  - [ ] Spawn health monitor, start axum server with routes + `/metrics`
-  - [ ] Add graceful shutdown handling
-- [ ] Run `cargo build` - should compile ✓
+- [x] Implement `src/main.rs`:
+  - [x] Parse CLI args for config path
+  - [x] Load config, initialize AppState and metrics
+  - [x] Spawn health monitor, start axum server with routes + `/metrics`
+  - [x] Add graceful shutdown handling
+- [x] Run `cargo build` - should compile ✓
 
 ---
 
@@ -411,16 +411,16 @@ Failover logic:
 #### 10.1 Write Tests FIRST (RED)
 > **IMPORTANT**: Finish writing ALL tests with real assertions before moving to 10.2
 
-- [ ] Write unit tests in `src/metrics.rs` `#[cfg(test)]` module:
-  - [ ] `test_metrics_initialization`
-  - [ ] `test_el_request_counter_increments`
-  - [ ] `test_gauge_updates`
-- [ ] Create stub struct
-- [ ] Run `cargo test metrics` - verify tests FAIL (RED ✗)
+- [x] Write unit tests in `src/metrics.rs` `#[cfg(test)]` module:
+  - [x] `test_metrics_initialization`
+  - [x] `test_el_request_counter_increments`
+  - [x] `test_gauge_updates`
+- [x] Create stub struct
+- [x] Run `cargo test metrics` - verify tests FAIL (RED ✗)
 
 #### 10.2 Implement (GREEN)
-- [ ] Implement `src/metrics.rs`:
-  - [ ] Define `VixyMetrics` struct using `#[metrics(scope = "vixy")]`:
+- [x] Implement `src/metrics.rs`:
+  - [x] Define `VixyMetrics` struct using `#[metrics(scope = "vixy")]`:
     ```rust
     #[metrics(scope = "vixy")]
     pub struct VixyMetrics {
@@ -467,38 +467,38 @@ Failover logic:
         ws_messages: Counter,  // direction = "upstream" | "downstream"
     }
     ```
-  - [ ] Create static instance: `static METRICS: LazyLock<VixyMetrics> = ...`
-  - [ ] Implement helper functions to record metrics throughout the codebase
-  - [ ] Add `/metrics` endpoint using prometric's HTTP exporter
-- [ ] Integrate metrics into health monitor:
-  - [ ] Update `el_block_number`, `el_lag`, `el_healthy` gauges on each check
-  - [ ] Update `cl_slot`, `cl_lag`, `cl_healthy` gauges on each check
-  - [ ] Increment `el_failovers` counter on primary→backup switch
-- [ ] Integrate metrics into proxy:
-  - [ ] Increment `el_requests` / `cl_requests` on each request
-  - [ ] Record `el_request_duration` / `cl_request_duration` histograms
-  - [ ] Update `ws_connections` gauge on connect/disconnect
-  - [ ] Increment `ws_messages` counter on each message
-- [ ] Run `cargo test metrics` - metrics tests should now PASS ✓
+  - [x] Create static instance: `static METRICS: LazyLock<VixyMetrics> = ...`
+  - [x] Implement helper functions to record metrics throughout the codebase
+  - [x] Add `/metrics` endpoint using prometric's HTTP exporter
+- [x] Integrate metrics into health monitor:
+  - [x] Update `el_block_number`, `el_lag`, `el_healthy` gauges on each check
+  - [x] Update `cl_slot`, `cl_lag`, `cl_healthy` gauges on each check
+  - [x] Increment `el_failovers` counter on primary→backup switch
+- [x] Integrate metrics into proxy:
+  - [x] Increment `el_requests` / `cl_requests` on each request
+  - [x] Record `el_request_duration` / `cl_request_duration` histograms
+  - [x] Update `ws_connections` gauge on connect/disconnect
+  - [x] Increment `ws_messages` counter on each message
+- [x] Run `cargo test metrics` - metrics tests should now PASS ✓
 
 ### Phase 11: Final Verification
-- [ ] Run `just ci` (or manually: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo test --test cucumber`)
-  - [ ] `cargo fmt --check` - code is formatted
-  - [ ] `cargo clippy -- -D warnings` - no warnings
-  - [ ] `cargo test` - ALL unit tests should PASS ✓
-  - [ ] `cargo test --test cucumber` - ALL BDD tests should PASS ✓
-- [ ] Verify GitHub Actions CI passes on push/PR
+- [x] Run `just ci` (or manually: `cargo fmt --check && cargo clippy -- -D warnings && cargo test && cargo test --test cucumber`)
+  - [x] `cargo fmt --check` - code is formatted
+  - [x] `cargo clippy -- -D warnings` - no warnings
+  - [x] `cargo test` - ALL unit tests should PASS ✓
+  - [x] `cargo test --test cucumber` - ALL BDD tests should PASS ✓
+- [x] Verify GitHub Actions CI passes on push/PR
 
 ### Phase 12: Enhancements (Optional)
-- [ ] Add `/status` endpoint to view all node health states as JSON
+- [x] Add `/status` endpoint to view all node health states as JSON
 - [ ] Implement round-robin or least-connections load balancing
 - [ ] Add retry logic for failed proxy requests (try next healthy node)
-- [ ] Add request timeout configuration
+- [x] Add request timeout configuration
 - [ ] Add TLS/HTTPS support
 - [ ] Add CL WebSocket support (CL events API)
 
 ### Phase 13: Write the Story
-- [ ] Create `BLOG.md` - a blog post telling the story of building Vixy with an AI Agent
+- [x] Create `BLOG.md` - a blog post telling the story of building Vixy with an AI Agent
   - Use `DIARY.md` as the primary resource for content
   - Highlight the engineering practices applied:
     - TDD (Test-Driven Development) - tests first, then implementation
@@ -510,6 +510,42 @@ Failover logic:
   - Include specific examples of challenges overcome (from DIARY.md)
   - Reflect on what worked well and what could be improved
   - Make it engaging - this is a story, not just a technical report
+
+### Phase 14: Integration Testing with Kurtosis
+- [x] Set up Kurtosis integration test infrastructure:
+  - [x] Create `kurtosis/network_params.yaml` - 4-node Ethereum testnet config
+  - [x] Create `scripts/setup-kurtosis.sh` - Auto-detects nodes, generates Vixy config
+  - [x] Add justfile commands: `kurtosis-up`, `kurtosis-down`, `kurtosis-vixy`, `integration-test`
+- [x] Create integration test scenarios (`tests/features/integration/`):
+  - [x] `cl_proxy.feature` - CL proxy forwarding and failover (4 scenarios)
+  - [x] `el_proxy.feature` - EL proxy forwarding, failover, backup failover, WebSocket (6 scenarios)
+  - [x] `health_monitoring.feature` - Status, detection, recovery, lag, metrics (5 scenarios)
+- [x] Implement integration step definitions (`tests/steps/integration_steps.rs`):
+  - [x] Kurtosis service start/stop helpers
+  - [x] HTTP request steps for EL JSON-RPC and CL Beacon API
+  - [x] Health polling and status verification
+  - [x] Backup failover test (stop ALL primaries, verify backups work)
+- [x] Fix bugs found by integration tests:
+  - [x] HTTP proxy Content-Type header forwarding
+  - [x] Accept 2xx status codes (Lighthouse returns 206 when syncing)
+
+**Test Configuration:**
+```yaml
+# 4-node testnet: 2 primary + 2 backup EL nodes
+participants:
+  - el_type: geth
+    cl_type: lighthouse
+    count: 4
+
+network_params:
+  preset: minimal
+  seconds_per_slot: 2
+```
+
+**Running Integration Tests:**
+```bash
+just integration-test  # Full cycle: setup, test, cleanup
+```
 
 ---
 

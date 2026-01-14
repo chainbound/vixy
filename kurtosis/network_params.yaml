@@ -1,0 +1,30 @@
+# Kurtosis Ethereum Package Configuration for Vixy Integration Tests
+# 4 nodes for comprehensive failover testing (2 primary + 2 backup)
+#
+# Usage:
+#   kurtosis run github.com/ethpandaops/ethereum-package --args-file network_params.yaml
+
+# Network participants - 4 EL/CL pairs for failover testing
+# el-1, el-2 = primary nodes
+# el-3, el-4 = backup nodes
+participants:
+  - el_type: geth
+    cl_type: lighthouse
+    count: 4
+
+# Network configuration
+network_params:
+  preset: minimal
+  seconds_per_slot: 2
+  genesis_delay: 20
+
+# Global configuration
+global_log_level: info
+
+# Port publishing for local access
+port_publisher:
+  nat_exit_ip: "127.0.0.1"
+  el:
+    enabled: true
+  cl:
+    enabled: true
