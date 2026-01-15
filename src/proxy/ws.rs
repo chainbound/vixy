@@ -331,10 +331,10 @@ async fn run_proxy_loop(
                     &upstream_sender,
                     &tracker,
                     &pending_subscribes,
-                ).await {
-                    if should_close {
-                        break;
-                    }
+                ).await
+                    && should_close
+                {
+                    break;
                 }
             }
 
@@ -345,10 +345,10 @@ async fn run_proxy_loop(
                     &client_sender,
                     &tracker,
                     &pending_subscribes,
-                ).await {
-                    if should_close {
-                        break;
-                    }
+                ).await
+                    && should_close
+                {
+                    break;
                 }
             }
 
@@ -482,11 +482,11 @@ async fn handle_client_message(
                     }
                 } else if method == Some("eth_unsubscribe") {
                     // Handle unsubscribe
-                    if let Some(params) = json.get("params").and_then(|p| p.as_array()) {
-                        if let Some(sub_id) = params.first().and_then(|s| s.as_str()) {
-                            tracker.lock().await.remove_subscription(sub_id);
-                            VixyMetrics::dec_ws_subscriptions();
-                        }
+                    if let Some(params) = json.get("params").and_then(|p| p.as_array())
+                        && let Some(sub_id) = params.first().and_then(|s| s.as_str())
+                    {
+                        tracker.lock().await.remove_subscription(sub_id);
+                        VixyMetrics::dec_ws_subscriptions();
                     }
                 }
             }
@@ -583,39 +583,32 @@ async fn handle_upstream_message(
                 }
 
                 // Check for subscription notification (has "params.subscription")
-                if let Some(params) = json.get("params") {
-                    if let Some(upstream_sub_id) =
+                if let Some(params) = json.get("params")
+                    && let Some(upstream_sub_id) =
                         params.get("subscription").and_then(|s| s.as_str())
+                {
+                    // Translate subscription ID if needed
+                    let tracker_guard = tracker.lock().await;
+                    if let Some(client_sub_id) =
+                        tracker_guard.translate_to_client_id(upstream_sub_id)
+                        && client_sub_id != upstream_sub_id
                     {
-                        // Translate subscription ID if needed
-                        let tracker_guard = tracker.lock().await;
-                        if let Some(client_sub_id) =
-                            tracker_guard.translate_to_client_id(upstream_sub_id)
+                        // Need to rewrite the subscription ID
+                        if let Ok(mut json_mut) =
+                            serde_json::from_str::<serde_json::Map<String, Value>>(&text_to_send)
+                            && let Some(params_mut) =
+                                json_mut.get_mut("params").and_then(|p| p.as_object_mut())
                         {
-                            if client_sub_id != upstream_sub_id {
-                                // Need to rewrite the subscription ID
-                                if let Ok(mut json_mut) =
-                                    serde_json::from_str::<serde_json::Map<String, Value>>(
-                                        &text_to_send,
-                                    )
-                                {
-                                    if let Some(params_mut) =
-                                        json_mut.get_mut("params").and_then(|p| p.as_object_mut())
-                                    {
-                                        params_mut.insert(
-                                            "subscription".to_string(),
-                                            Value::String(client_sub_id.to_string()),
-                                        );
-                                        text_to_send = serde_json::to_string(&json_mut)
-                                            .unwrap_or(text_to_send);
-                                        debug!(
-                                            upstream_id = upstream_sub_id,
-                                            client_id = client_sub_id,
-                                            "Translated subscription ID"
-                                        );
-                                    }
-                                }
-                            }
+                            params_mut.insert(
+                                "subscription".to_string(),
+                                Value::String(client_sub_id.to_string()),
+                            );
+                            text_to_send = serde_json::to_string(&json_mut).unwrap_or(text_to_send);
+                            debug!(
+                                upstream_id = upstream_sub_id,
+                                client_id = client_sub_id,
+                                "Translated subscription ID"
+                            );
                         }
                     }
                 }
