@@ -1,5 +1,6 @@
 # Build stage
-FROM rust:latest AS builder
+# Use bookworm to match runtime glibc version
+FROM rust:bookworm AS builder
 
 # Install build dependencies for aws-lc-sys (rustls backend)
 RUN apt-get update && apt-get install -y \
