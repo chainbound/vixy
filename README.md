@@ -101,20 +101,32 @@ curl -X POST http://localhost:8080/el \
 ```
 
 **GET /el/ws**
-- WebSocket proxy for EL subscriptions (HTTP upgrade to WebSocket)
+- Transparent WebSocket proxy supporting all JSON-RPC methods over WebSocket
 - Connects to first healthy primary node, falls back to first healthy backup
-- Automatic reconnection with subscription replay on node failure
+- Special handling for `eth_subscribe` and `eth_unsubscribe`:
+  - Tracks active subscriptions
+  - Automatic subscription replay on reconnection
 - Health-aware upstream switching (primary → backup tier when needed)
-- Supports `eth_subscribe` and `eth_unsubscribe`
+- Supports both text and binary WebSocket frames
 
 Example:
 ```javascript
 const ws = new WebSocket('ws://localhost:8080/el/ws');
+
+// Subscribe to new blocks
 ws.send(JSON.stringify({
   jsonrpc: '2.0',
   method: 'eth_subscribe',
   params: ['newHeads'],
   id: 1
+}));
+
+// Can also send regular JSON-RPC calls over WebSocket
+ws.send(JSON.stringify({
+  jsonrpc: '2.0',
+  method: 'eth_blockNumber',
+  params: [],
+  id: 2
 }));
 ```
 
