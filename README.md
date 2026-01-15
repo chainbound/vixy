@@ -72,6 +72,124 @@ url = "http://lighthouse-1:5052"
 
 See [config.example.toml](config.example.toml) for all available options.
 
+## API Endpoints
+
+Vixy exposes the following HTTP endpoints:
+
+### Proxy Endpoints
+
+#### Execution Layer (EL)
+
+**POST /el**
+- Proxies JSON-RPC requests to healthy EL nodes
+- Supports batch requests
+- Automatic failover to backup nodes on failure
+- Content-Type: `application/json`
+
+Example:
+```bash
+curl -X POST http://localhost:8080/el \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "eth_blockNumber",
+    "params": [],
+    "id": 1
+  }'
+```
+
+**GET /el/ws**
+- WebSocket proxy for EL subscriptions
+- Supports `eth_subscribe` and `eth_unsubscribe`
+- Automatic reconnection with subscription replay
+- Health-aware upstream switching
+
+Example:
+```javascript
+const ws = new WebSocket('ws://localhost:8080/el/ws');
+ws.send(JSON.stringify({
+  jsonrpc: '2.0',
+  method: 'eth_subscribe',
+  params: ['newHeads'],
+  id: 1
+}));
+```
+
+#### Consensus Layer (CL)
+
+**ANY /cl/{path}**
+- Proxies all HTTP methods (GET, POST, etc.) to healthy CL nodes
+- Forwards all paths under `/cl/` to CL nodes
+- Automatic failover to next healthy node
+
+Example:
+```bash
+# Get beacon chain head
+curl http://localhost:8080/cl/eth/v1/beacon/headers/head
+
+# Check node health
+curl http://localhost:8080/cl/eth/v1/node/health
+
+# Get node syncing status
+curl http://localhost:8080/cl/eth/v1/node/syncing
+```
+
+### Monitoring Endpoints
+
+**GET /health**
+- Simple health check for the proxy itself
+- Returns: `OK` (200 status)
+- Useful for load balancer health checks
+
+Example:
+```bash
+curl http://localhost:8080/health
+```
+
+**GET /status**
+- Detailed JSON status of all monitored nodes
+- Shows health state, block/slot numbers, and lag
+- Content-Type: `application/json`
+
+Example:
+```bash
+curl http://localhost:8080/status | jq .
+```
+
+Response format:
+```json
+{
+  "el_nodes": {
+    "geth-primary": {
+      "healthy": true,
+      "block_number": 12345678,
+      "lag": 0,
+      "tier": "primary"
+    }
+  },
+  "cl_nodes": {
+    "lighthouse-1": {
+      "healthy": true,
+      "slot": 9876543,
+      "lag": 1
+    }
+  },
+  "el_failover_active": false
+}
+```
+
+**GET /metrics**
+- Prometheus metrics endpoint
+- Only available if `metrics.enabled = true` in config
+- Can be on main port or separate port (see `metrics.port`)
+
+Example:
+```bash
+curl http://localhost:9090/metrics
+```
+
+See [grafana/README.md](grafana/README.md) for full metrics documentation.
+
 ## Documentation
 
 ### User Guide
