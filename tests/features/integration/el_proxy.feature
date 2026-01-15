@@ -42,3 +42,24 @@ Feature: EL Proxy Integration Tests
     When I connect to the EL WebSocket endpoint
     And I subscribe to newHeads
     Then I should receive new block headers
+
+  @integration @el @websocket @failover
+  Scenario: WebSocket reconnects when primary node becomes unhealthy
+    Given all Kurtosis services are running
+    When I connect to the EL WebSocket endpoint
+    And I subscribe to newHeads
+    And I receive at least one block header
+    When the primary EL node is stopped
+    And I wait 6 seconds for health detection
+    Then the WebSocket connection should still be open
+    And I should continue receiving block headers
+
+  @integration @el @websocket @failover
+  Scenario: WebSocket subscription IDs preserved after reconnection
+    Given all Kurtosis services are running
+    When I connect to the EL WebSocket endpoint
+    And I subscribe to newHeads and note the subscription ID
+    And I receive at least one block header
+    When the primary EL node is stopped
+    And I wait 6 seconds for health detection
+    Then subscription events should use the same subscription ID

@@ -81,9 +81,33 @@ pub struct VixyMetrics {
     #[metric(rename = "ws_connections_active")]
     ws_connections: Gauge,
 
+    /// Total WebSocket connections established (lifetime)
+    #[metric(rename = "ws_connections_total")]
+    ws_connections_total: Counter,
+
     /// Total WebSocket messages
     #[metric(rename = "ws_messages_total", labels = ["direction"])]
     ws_messages: Counter,
+
+    /// Total WebSocket reconnections due to unhealthy upstream
+    #[metric(rename = "ws_reconnections_total")]
+    ws_reconnections: Counter,
+
+    /// WebSocket reconnection attempts (including failures)
+    #[metric(rename = "ws_reconnection_attempts_total", labels = ["status"])]
+    ws_reconnection_attempts: Counter,
+
+    /// Active WebSocket subscriptions
+    #[metric(rename = "ws_subscriptions_active")]
+    ws_subscriptions: Gauge,
+
+    /// Total WebSocket subscriptions created (lifetime)
+    #[metric(rename = "ws_subscriptions_total")]
+    ws_subscriptions_total: Counter,
+
+    /// Current upstream node for WebSocket connections
+    #[metric(rename = "ws_upstream_node", labels = ["node"])]
+    ws_upstream_node: Gauge,
 }
 
 /// Global metrics instance
@@ -200,6 +224,7 @@ impl VixyMetrics {
     /// Increment active WebSocket connections
     pub fn inc_ws_connections() {
         METRICS.ws_connections().inc();
+        METRICS.ws_connections_total().inc();
     }
 
     /// Decrement active WebSocket connections
@@ -210,6 +235,39 @@ impl VixyMetrics {
     /// Increment WebSocket message counter
     pub fn inc_ws_messages(direction: &str) {
         METRICS.ws_messages(direction).inc();
+    }
+
+    /// Increment WebSocket reconnection counter (successful)
+    pub fn inc_ws_reconnections() {
+        METRICS.ws_reconnections().inc();
+    }
+
+    /// Record WebSocket reconnection attempt
+    pub fn inc_ws_reconnection_attempt(status: &str) {
+        METRICS.ws_reconnection_attempts(status).inc();
+    }
+
+    /// Increment active WebSocket subscriptions
+    pub fn inc_ws_subscriptions() {
+        METRICS.ws_subscriptions().inc();
+        METRICS.ws_subscriptions_total().inc();
+    }
+
+    /// Decrement active WebSocket subscriptions
+    pub fn dec_ws_subscriptions() {
+        METRICS.ws_subscriptions().dec();
+    }
+
+    /// Set active subscriptions count directly
+    pub fn set_ws_subscriptions(count: u64) {
+        METRICS.ws_subscriptions().set(count);
+    }
+
+    /// Set current upstream node for WebSocket (1 = connected, 0 = not)
+    pub fn set_ws_upstream_node(node: &str, connected: bool) {
+        METRICS
+            .ws_upstream_node(node)
+            .set(if connected { 1u64 } else { 0u64 });
     }
 }
 
@@ -272,6 +330,25 @@ mod tests {
         VixyMetrics::inc_ws_messages("downstream");
         VixyMetrics::dec_ws_connections();
         // If we get here without panic, WS metrics are working
+    }
+
+    #[test]
+    fn test_ws_reconnection_metrics() {
+        VixyMetrics::inc_ws_reconnections();
+        VixyMetrics::inc_ws_reconnection_attempt("success");
+        VixyMetrics::inc_ws_reconnection_attempt("failed");
+        // If we get here without panic, reconnection metrics are working
+    }
+
+    #[test]
+    fn test_ws_subscription_metrics() {
+        VixyMetrics::inc_ws_subscriptions();
+        VixyMetrics::inc_ws_subscriptions();
+        VixyMetrics::dec_ws_subscriptions();
+        VixyMetrics::set_ws_subscriptions(5);
+        VixyMetrics::set_ws_upstream_node("geth-1", true);
+        VixyMetrics::set_ws_upstream_node("geth-2", false);
+        // If we get here without panic, subscription metrics are working
     }
 
     #[test]

@@ -811,26 +811,263 @@ async fn verify_primary_el_healthy(world: &mut IntegrationWorld) {
 }
 
 // =============================================================================
-// WebSocket Steps (placeholder - requires WebSocket client)
+// WebSocket Steps
 // =============================================================================
+
+use crate::world::WsConnection;
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
 
 #[when("I connect to the EL WebSocket endpoint")]
 async fn connect_ws_endpoint(world: &mut IntegrationWorld) {
-    // WebSocket testing would require tokio-tungstenite client
-    // For now, just mark as connected
-    world.ws_connected = true;
+    let vixy_url = world.vixy_url.as_ref().expect("Vixy URL not set");
+    // Convert http://host:port to ws://host:port/el/ws
+    let ws_url = vixy_url.replace("http://", "ws://") + "/el/ws";
+
+    match connect_async(&ws_url).await {
+        Ok((ws_stream, _)) => {
+            let (sender, receiver) = ws_stream.split();
+            world.ws_connection = Some(WsConnection { sender, receiver });
+            world.ws_connected = true;
+            eprintln!("Connected to WebSocket at {ws_url}");
+        }
+        Err(e) => {
+            panic!("Failed to connect to WebSocket at {ws_url}: {e}");
+        }
+    }
 }
 
 #[when("I subscribe to newHeads")]
 async fn subscribe_new_heads(world: &mut IntegrationWorld) {
-    // Placeholder - would send eth_subscribe for newHeads
+    let conn = world
+        .ws_connection
+        .as_mut()
+        .expect("WebSocket not connected");
+
+    let subscribe_msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_subscribe",
+        "params": ["newHeads"]
+    });
+
+    conn.sender
+        .send(WsMessage::Text(subscribe_msg.to_string().into()))
+        .await
+        .expect("Failed to send subscribe message");
+
+    // Wait for subscription response
+    let timeout = Duration::from_secs(10);
+    let response = tokio::time::timeout(timeout, conn.receiver.next())
+        .await
+        .expect("Timeout waiting for subscribe response")
+        .expect("WebSocket closed")
+        .expect("Failed to receive message");
+
+    if let WsMessage::Text(text) = response {
+        let json: serde_json::Value =
+            serde_json::from_str(&text).expect("Invalid JSON in subscribe response");
+        if let Some(result) = json.get("result") {
+            world.subscription_id = result.as_str().map(String::from);
+            eprintln!("Subscribed with ID: {:?}", world.subscription_id);
+        } else if let Some(error) = json.get("error") {
+            panic!("Subscribe failed with error: {error}");
+        }
+    }
+}
+
+#[when("I subscribe to newHeads and note the subscription ID")]
+async fn subscribe_new_heads_note_id(world: &mut IntegrationWorld) {
+    subscribe_new_heads(world).await;
+    assert!(
+        world.subscription_id.is_some(),
+        "Should have received a subscription ID"
+    );
+}
+
+#[when("I receive at least one block header")]
+async fn receive_block_header(world: &mut IntegrationWorld) {
+    let conn = world
+        .ws_connection
+        .as_mut()
+        .expect("WebSocket not connected");
+
+    // Wait for a subscription notification (block header)
+    let timeout = Duration::from_secs(30); // Allow time for block production
+    let response = tokio::time::timeout(timeout, conn.receiver.next())
+        .await
+        .expect("Timeout waiting for block header")
+        .expect("WebSocket closed")
+        .expect("Failed to receive message");
+
+    if let WsMessage::Text(text) = response {
+        let json: serde_json::Value =
+            serde_json::from_str(&text).expect("Invalid JSON in notification");
+
+        // Should be a subscription notification with params.result containing the header
+        if json.get("params").is_some() {
+            world.last_subscription_event = Some(json);
+            eprintln!("Received block header notification");
+        } else {
+            panic!("Expected subscription notification, got: {text}");
+        }
+    }
+}
+
+#[when(expr = "I wait {int} seconds for health detection")]
+async fn wait_seconds_for_health(world: &mut IntegrationWorld, seconds: u32) {
     let _ = world;
+    tokio::time::sleep(Duration::from_secs(seconds as u64)).await;
+}
+
+#[when("the primary EL node is stopped")]
+async fn when_primary_el_stopped(world: &mut IntegrationWorld) {
+    // Reuse the existing step
+    stop_primary_el_node(world).await;
+}
+
+#[then("the WebSocket connection should still be open")]
+async fn verify_ws_still_open(world: &mut IntegrationWorld) {
+    let conn = world
+        .ws_connection
+        .as_mut()
+        .expect("WebSocket not connected");
+
+    // Send a ping to verify connection is still open
+    conn.sender
+        .send(WsMessage::Ping(vec![1, 2, 3].into()))
+        .await
+        .expect("WebSocket should still be open - failed to send ping");
+
+    // Wait for pong response
+    let timeout = Duration::from_secs(5);
+    let response = tokio::time::timeout(timeout, conn.receiver.next())
+        .await
+        .expect("Timeout waiting for pong")
+        .expect("WebSocket closed unexpectedly")
+        .expect("Failed to receive pong");
+
+    match response {
+        WsMessage::Pong(_) => {
+            eprintln!("WebSocket connection verified open (pong received)");
+        }
+        WsMessage::Text(text) => {
+            // Might receive a subscription notification instead - that's also fine
+            eprintln!("Received text while checking connection: {text}");
+        }
+        other => {
+            eprintln!("Received unexpected message type: {other:?}");
+        }
+    }
+
+    assert!(
+        world.ws_connected,
+        "WebSocket should still be marked as connected"
+    );
+}
+
+#[then("I should continue receiving block headers")]
+async fn verify_continue_receiving_headers(world: &mut IntegrationWorld) {
+    let conn = world
+        .ws_connection
+        .as_mut()
+        .expect("WebSocket not connected");
+
+    // Wait for another subscription notification (proving reconnection worked)
+    let timeout = Duration::from_secs(30); // Allow time for reconnection + block production
+
+    let mut received_header = false;
+    let start = std::time::Instant::now();
+
+    // Keep trying to receive messages until we get a header or timeout
+    while start.elapsed() < timeout && !received_header {
+        match tokio::time::timeout(Duration::from_secs(5), conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if json.get("params").is_some() {
+                        // This is a subscription notification
+                        received_header = true;
+                        world.last_subscription_event = Some(json);
+                        eprintln!("Received block header after reconnection");
+                    }
+                }
+            }
+            Ok(Some(Ok(WsMessage::Pong(_)))) => {
+                // Ignore pongs
+            }
+            Ok(Some(Ok(WsMessage::Ping(data)))) => {
+                // Respond to pings
+                let _ = conn.sender.send(WsMessage::Pong(data)).await;
+            }
+            Ok(Some(Err(e))) => {
+                panic!("WebSocket error after reconnection: {e}");
+            }
+            Ok(None) => {
+                panic!("WebSocket closed unexpectedly");
+            }
+            Err(_) => {
+                // Timeout on this iteration, keep trying
+            }
+            _ => {
+                // Binary, Close, Frame - ignore
+            }
+        }
+    }
+
+    assert!(
+        received_header,
+        "Should have received a block header after reconnection"
+    );
 }
 
 #[then("I should receive new block headers")]
 async fn verify_new_headers(world: &mut IntegrationWorld) {
-    // Placeholder - would verify WebSocket messages
-    // Skip if not actually connected
-    if !world.ws_connected {}
-    // In a real implementation, we'd wait for and verify headers
+    if !world.ws_connected || world.ws_connection.is_none() {
+        // Skip if WebSocket isn't actually connected (placeholder behavior)
+        return;
+    }
+
+    receive_block_header(world).await;
+}
+
+#[then("subscription events should use the same subscription ID")]
+async fn verify_same_subscription_id(world: &mut IntegrationWorld) {
+    let original_sub_id = world
+        .subscription_id
+        .as_ref()
+        .expect("No original subscription ID recorded");
+
+    let conn = world
+        .ws_connection
+        .as_mut()
+        .expect("WebSocket not connected");
+
+    // Wait for a subscription notification
+    let timeout = Duration::from_secs(30);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        match tokio::time::timeout(Duration::from_secs(5), conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(params) = json.get("params") {
+                        if let Some(sub_id) = params.get("subscription").and_then(|s| s.as_str()) {
+                            assert_eq!(
+                                sub_id, original_sub_id,
+                                "Subscription ID changed after reconnection! Original: {original_sub_id}, Got: {sub_id}"
+                            );
+                            eprintln!("Verified subscription ID preserved: {sub_id}");
+                            return;
+                        }
+                    }
+                }
+            }
+            Ok(Some(Ok(WsMessage::Ping(data)))) => {
+                let _ = conn.sender.send(WsMessage::Pong(data)).await;
+            }
+            _ => {}
+        }
+    }
+
+    panic!("Timeout waiting for subscription event to verify ID");
 }
