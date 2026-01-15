@@ -175,22 +175,30 @@ curl http://localhost:8080/status | jq .
 Response format:
 ```json
 {
-  "el_nodes": {
-    "geth-primary": {
-      "healthy": true,
+  "el_chain_head": 12345678,
+  "cl_chain_head": 9876543,
+  "el_failover_active": false,
+  "el_nodes": [
+    {
+      "name": "geth-primary",
+      "http_url": "http://geth-1:8545",
+      "is_primary": true,
       "block_number": 12345678,
       "lag": 0,
-      "tier": "primary"
+      "check_ok": true,
+      "is_healthy": true
     }
-  },
-  "cl_nodes": {
-    "lighthouse-1": {
-      "healthy": true,
+  ],
+  "cl_nodes": [
+    {
+      "name": "lighthouse-1",
+      "url": "http://lighthouse-1:5052",
       "slot": 9876543,
-      "lag": 1
+      "lag": 1,
+      "health_ok": true,
+      "is_healthy": true
     }
-  },
-  "el_failover_active": false
+  ]
 }
 ```
 
