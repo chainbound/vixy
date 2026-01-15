@@ -82,9 +82,9 @@ Vixy exposes the following HTTP endpoints:
 
 **POST /el**
 - Proxies JSON-RPC requests to healthy EL nodes (uses JSON-RPC protocol, not REST)
-- Supports multiple primary nodes (round-robin load balancing)
-- Supports multiple backup nodes (used when all primary nodes fail)
-- Automatic failover: primary → backup tier on failure
+- Selects first healthy primary node
+- Falls back to first healthy backup node if all primary nodes are unhealthy
+- Automatic failover: primary → backup tier when no primary nodes available
 - Supports batch requests
 - Content-Type: `application/json`
 
@@ -102,9 +102,9 @@ curl -X POST http://localhost:8080/el \
 
 **GET /el/ws**
 - WebSocket proxy for EL subscriptions (HTTP upgrade to WebSocket)
-- Connects to healthy EL nodes from primary tier first
+- Connects to first healthy primary node, falls back to first healthy backup
 - Automatic reconnection with subscription replay on node failure
-- Health-aware upstream switching (primary → backup on failure)
+- Health-aware upstream switching (primary → backup tier when needed)
 - Supports `eth_subscribe` and `eth_unsubscribe`
 
 Example:
@@ -122,9 +122,9 @@ ws.send(JSON.stringify({
 
 **ANY /cl/{path}**
 - Proxies all HTTP methods (GET, POST, etc.) to healthy CL nodes (uses REST API)
-- Supports multiple CL nodes (round-robin load balancing)
+- Selects first healthy CL node from configured nodes
 - Forwards all paths under `/cl/` to beacon node API endpoints
-- Automatic failover to next healthy node on failure
+- Automatic failover to next healthy node if current node becomes unhealthy
 
 Example:
 ```bash
