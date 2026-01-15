@@ -9,6 +9,7 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::health::{cl, el};
+use crate::metrics::VixyMetrics;
 use crate::state::AppState;
 
 /// Run a single health check cycle for all nodes
@@ -70,9 +71,13 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     // Store chain head
     state.el_chain_head.store(chain_head, Ordering::SeqCst);
 
+    // Update chain head metric
+    VixyMetrics::set_el_chain_head(chain_head);
+
     // Second pass: calculate health for each node
     let mut el_nodes = state.el_nodes.write().await;
     let mut any_primary_healthy = false;
+    let mut healthy_count = 0u64;
 
     for node in el_nodes.iter_mut() {
         el::calculate_el_health(node, chain_head, state.max_el_lag);
@@ -80,6 +85,16 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
         if node.is_primary && node.is_healthy {
             any_primary_healthy = true;
         }
+
+        if node.is_healthy {
+            healthy_count += 1;
+        }
+
+        // Update per-node metrics
+        let tier = if node.is_primary { "primary" } else { "backup" };
+        VixyMetrics::set_el_block_number(&node.name, tier, node.block_number);
+        VixyMetrics::set_el_lag(&node.name, tier, node.lag);
+        VixyMetrics::set_el_healthy(&node.name, tier, node.is_healthy);
 
         debug!(
             node = %node.name,
@@ -91,6 +106,9 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
             "EL node health calculated"
         );
     }
+
+    // Update healthy nodes count metric
+    VixyMetrics::set_el_healthy_nodes(healthy_count);
 
     any_primary_healthy
 }
@@ -136,12 +154,25 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
     // Store chain head
     state.cl_chain_head.store(chain_head, Ordering::SeqCst);
 
+    // Update chain head metric
+    VixyMetrics::set_cl_chain_head(chain_head);
+
     // Second pass: calculate health for each node
     {
         let mut cl_nodes = state.cl_nodes.write().await;
+        let mut healthy_count = 0u64;
 
         for node in cl_nodes.iter_mut() {
             cl::calculate_cl_health(node, chain_head, state.max_cl_lag);
+
+            if node.is_healthy {
+                healthy_count += 1;
+            }
+
+            // Update per-node metrics
+            VixyMetrics::set_cl_slot(&node.name, node.slot);
+            VixyMetrics::set_cl_lag(&node.name, node.lag);
+            VixyMetrics::set_cl_healthy(&node.name, node.is_healthy);
 
             debug!(
                 node = %node.name,
@@ -152,6 +183,9 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
                 "CL node health calculated"
             );
         }
+
+        // Update healthy nodes count metric
+        VixyMetrics::set_cl_healthy_nodes(healthy_count);
     }
 }
 
@@ -165,7 +199,10 @@ pub fn update_failover_flag(state: &Arc<AppState>, any_primary_healthy: bool) {
             .el_failover_active
             .store(is_failover, Ordering::SeqCst);
 
+        // Update metrics
+        VixyMetrics::set_el_failover_active(is_failover);
         if is_failover {
+            VixyMetrics::inc_el_failovers();
             warn!("EL failover ACTIVATED - all primary nodes unhealthy, using backups");
         } else {
             info!("EL failover DEACTIVATED - primary node recovered");
