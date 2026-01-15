@@ -1,6 +1,6 @@
 [package]
 name = "vixy"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 description = "A Rust proxy that monitors Ethereum EL and CL nodes, tracks their health, and routes requests to healthy nodes"
 license = "MIT"
