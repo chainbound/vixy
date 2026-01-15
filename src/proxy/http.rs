@@ -8,9 +8,10 @@ use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
+use crate::metrics::VixyMetrics;
 use crate::proxy::selection;
 use crate::state::AppState;
 
@@ -22,16 +23,21 @@ pub async fn el_proxy_handler(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Response {
+    let start = Instant::now();
+
     // Read the failover flag
     let failover_active = state.el_failover_active.load(Ordering::SeqCst);
 
     // Get a read lock on EL nodes and extract what we need
-    let (target_url, node_name) = {
+    let (target_url, node_name, tier) = {
         let el_nodes = state.el_nodes.read().await;
 
         // Select a healthy node
         match selection::select_el_node(&el_nodes, failover_active) {
-            Some(n) => (n.http_url.clone(), n.name.clone()),
+            Some(n) => {
+                let tier = if n.is_primary { "primary" } else { "backup" };
+                (n.http_url.clone(), n.name.clone(), tier)
+            }
             None => {
                 warn!("No healthy EL node available");
                 return (
@@ -43,10 +49,17 @@ pub async fn el_proxy_handler(
         }
     };
 
-    debug!(target_url, node_name, "Proxying EL request");
+    debug!(target_url, node_name, tier, "Proxying EL request");
 
     // Forward the request
-    forward_request(request, &target_url).await
+    let response = forward_request(request, &target_url).await;
+
+    // Record metrics
+    let duration = start.elapsed().as_secs_f64();
+    VixyMetrics::inc_el_requests(&node_name, tier);
+    VixyMetrics::observe_el_duration(&node_name, tier, duration);
+
+    response
 }
 
 /// Handle CL HTTP proxy requests (GET/POST /cl/*)
@@ -54,6 +67,8 @@ pub async fn cl_proxy_handler(
     State(state): State<Arc<AppState>>,
     request: Request<Body>,
 ) -> Response {
+    let start = Instant::now();
+
     // Get a read lock on CL nodes and extract what we need
     let (target_url, node_name) = {
         let cl_nodes = state.cl_nodes.read().await;
@@ -106,7 +121,14 @@ pub async fn cl_proxy_handler(
     debug!(full_url, node_name, "Proxying CL request");
 
     // Forward the request to the constructed URL
-    forward_request_to_url(request, &full_url).await
+    let response = forward_request_to_url(request, &full_url).await;
+
+    // Record metrics
+    let duration = start.elapsed().as_secs_f64();
+    VixyMetrics::inc_cl_requests(&node_name);
+    VixyMetrics::observe_cl_duration(&node_name, duration);
+
+    response
 }
 
 /// Forward a request to a target URL
