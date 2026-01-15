@@ -1,6 +1,16 @@
 //! Test world state for BDD tests
 
 use cucumber::World;
+use futures_util::stream::{SplitSink, SplitStream};
+use tokio::net::TcpStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
+
+/// Type alias for WebSocket stream
+pub type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// Type alias for WebSocket sender
+pub type WsSender = SplitSink<WsStream, Message>;
+/// Type alias for WebSocket receiver
+pub type WsReceiver = SplitStream<WsStream>;
 
 /// The test world state for Vixy BDD tests (unit tests)
 #[derive(Debug, Default, World)]
@@ -25,9 +35,17 @@ pub struct VixyWorld {
     pub last_error: Option<String>,
 }
 
+/// Container for WebSocket connection state (not Debug because streams don't implement it)
+pub struct WsConnection {
+    /// WebSocket sender half
+    pub sender: WsSender,
+    /// WebSocket receiver half
+    pub receiver: WsReceiver,
+}
+
 /// The test world state for Vixy integration tests
 /// Used for tests that run against real Docker/Kurtosis infrastructure
-#[derive(Debug, Default, World)]
+#[derive(Default, World)]
 pub struct IntegrationWorld {
     /// Vixy server URL (e.g., "http://127.0.0.1:8080")
     pub vixy_url: Option<String>,
@@ -43,4 +61,27 @@ pub struct IntegrationWorld {
     pub stopped_containers: Vec<String>,
     /// Whether WebSocket is connected
     pub ws_connected: bool,
+    /// WebSocket connection (sender + receiver)
+    pub ws_connection: Option<WsConnection>,
+    /// Subscription ID from eth_subscribe response
+    pub subscription_id: Option<String>,
+    /// Last received subscription event (for verification)
+    pub last_subscription_event: Option<serde_json::Value>,
+}
+
+impl std::fmt::Debug for IntegrationWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IntegrationWorld")
+            .field("vixy_url", &self.vixy_url)
+            .field("last_status_code", &self.last_status_code)
+            .field("last_response_body", &self.last_response_body)
+            .field("healthy_el_count", &self.healthy_el_count)
+            .field("healthy_cl_count", &self.healthy_cl_count)
+            .field("stopped_containers", &self.stopped_containers)
+            .field("ws_connected", &self.ws_connected)
+            .field("ws_connection", &self.ws_connection.is_some())
+            .field("subscription_id", &self.subscription_id)
+            .field("last_subscription_event", &self.last_subscription_event)
+            .finish()
+    }
 }

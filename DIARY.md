@@ -30,6 +30,57 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-15 - WebSocket Health-Aware Reconnection
+
+**What I did:**
+- Implemented automatic WebSocket reconnection when upstream EL node becomes unhealthy
+- Added subscription tracking to replay `eth_subscribe` requests on reconnection
+- Subscription IDs are preserved - client sees seamless continuation
+
+**Key Components:**
+1. **SubscriptionTracker** - Tracks active subscriptions and maps upstream IDs to client IDs
+   - `track_subscribe()` - Records subscription request and client-facing ID
+   - `map_upstream_id()` - Maps new upstream ID after reconnection
+   - `translate_to_client_id()` - Translates IDs in subscription notifications
+   - `remove_subscription()` - Handles eth_unsubscribe
+
+2. **Health Monitor** - Background task checking node health every second
+   - `is_node_healthy()` - Checks current node's health status
+   - `select_healthy_node()` - Finds alternative healthy node for reconnection
+   - Signals reconnection via mpsc channel when current node unhealthy
+
+3. **Reconnection Logic** - Replays subscriptions to new upstream
+   - Clears old upstream ID mappings
+   - Replays all tracked subscription requests
+   - Updates ID mappings when responses arrive
+
+**Technical Details:**
+- Refactored `handle_websocket` to use channels for message coordination
+- Added type aliases (`UpstreamSender`, `UpstreamReceiver`, `ClientSender`, `PendingSubscribes`) for cleaner code
+- Health check interval: 1 second
+- Subscription ID translation happens transparently in message forwarding
+
+**Tests Added:**
+- 7 unit tests for SubscriptionTracker
+- All existing WS tests continue to pass (10 total)
+
+**Challenges faced:**
+- Complex type signatures required type aliases to satisfy clippy
+- Coordinating reconnection while maintaining bidirectional message forwarding
+- Handling subscription response tracking across async boundaries
+
+**How I solved it:**
+- Created type aliases for complex WebSocket stream types
+- Used mpsc channels to decouple message receiving from processing
+- Used Arc<Mutex<>> for shared state between health monitor and proxy loop
+
+**What I learned:**
+- WebSocket proxy with reconnection requires careful state management
+- Subscription ID translation is essential for seamless client experience
+- Rust's type system (clippy) encourages clean abstractions via type aliases
+
+**Mood:** Accomplished - this was a significant feature addition with real-world value!
+
 ### 2026-01-13 - Phase 14: Kurtosis Integration Testing
 
 **What I did:**
