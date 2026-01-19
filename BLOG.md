@@ -1,333 +1,148 @@
-# Building Vixy: An Ethereum Proxy with AI-Assisted Development
+# vixy: Vibing the Ethereum EL and CL Proxy
 
-*A story of building production-grade software with TDD, BDD, and an AI pair programmer*
+![Vixy Header](vixy%20Vibing%20the%20Ethereum%20EL%20and%20CL%20Proxy/Gemini_Generated_Image_ce9n8oce9n8oce9n.jpeg)
 
----
+At [chainbound](https://x.com/chainbound_), we like to experiment with fun stuff and since Claude launched Opus 4.5, it’s been hell lot of fun playing with it. On this episode of experimentation, we tried to one-shot an Ethereum Execution Layer and Consensus Layer proxy. We applied modern engineering practices as guardrails and wanted to see whether or not it can ship a production-ready service quickly.
 
-## The Challenge
+## Backstory
 
-Building infrastructure software for Ethereum is not trivial. Validators, stakers, and application developers all depend on reliable access to both the Execution Layer (EL) and Consensus Layer (CL). When nodes go down or fall behind, requests fail. When requests fail, users suffer.
+As a company focused on blockchain development and research, we run tons of execution clients and consensus clients ourselves. The problem comes when nodes are out of sync or even dead. We need a way of automatic detection and backup for them. So we decided that we need to put a proxy that handles fail recovery for both EL and CL.
 
-Vixy was born from a simple need: **route requests to healthy nodes, automatically**.
+At first, we were going to integrate https://github.com/rainshowerLabs/blutgang for EL and https://github.com/sozu-proxy/sozu for CL. But https://x.com/merklefruit was like nahhhh, we can do better, why bother with having two dependencies when we can maybe one-shot a single binary to handle both cases. And I was like let’s do it!
 
-But this blog isn't just about what Vixy does—it's about *how* it was built. In a single day, using Test-Driven Development (TDD), Behavior-Driven Development (BDD), and an AI assistant (Claude), we went from an empty repository to a fully functional, well-tested Ethereum proxy.
+## The Spec
 
----
+1. Read config.toml file for EL and CL node list
+2. Always check those lists to mark healthy nodes
+3. Serve proxy endpoints (for EL HTTP and WS, and CL HTTP) that always try to point to a healthy node
 
-## The Blueprint: AGENT.md
+And the health conditions are as follows:
 
-Every successful project starts with a plan. Before writing a single line of code, we created `AGENT.md`—a comprehensive specification that served as both documentation and task list.
+- **EL**: `eth_getBlockNumber` returns a block number (in hex). Compare the block numbers between all active ELs, keep track of the highest one (aka “chain head”), and track the “lag” from that. Consider a node unhealthy if it’s lagging more than a configurable MAX_EL_LAG_BLOCKS value.
+- **CL**: `/eth/v1/node/health` should return 200 OK, AND `/eth/v1/beacon/headers/head` must return a value in `/data/header/message/slot` (JSON pointer) which is the slot number. Same story here, track the CL chain head and keep track of lag, and consider unhealthy if lag > MAX_CL_LAG_SLOTS value.
 
-The plan broke development into 13 phases:
+## The Prompt
 
-1. **Project Setup** - Dependencies, file structure, CI/CD
-2. **BDD Infrastructure** - Cucumber test harness
-3. **Configuration** - TOML parsing with validation
-4. **State Management** - Thread-safe node state tracking
-5. **EL Health Check** - JSON-RPC block number monitoring
-6. **CL Health Check** - Beacon API health and slot monitoring
-7. **Health Monitor** - Background health checking loop
-8. **Proxy Server** - HTTP and WebSocket request forwarding
-9. **Main Entry Point** - CLI and server initialization
-10. **Metrics** - Prometheus endpoint
-11. **Final Verification** - CI validation
-12. **Enhancements** - Status endpoint, configuration options
-13. **Write the Story** - This blog post
+[The Initial Prompt PR](https://github.com/chainbound/vixy/pull/1)
 
-Each phase had clear deliverables, test requirements, and acceptance criteria. The AI could follow this blueprint autonomously, making decisions within defined boundaries.
+Naively, most people will just copy the spec and then tell Claude to code the service directly. It might work, but the better thing to do would be to ask them to act as an engineer and make a plan for it. Hence we decided to create a file called AGENT.md in which we vibe-prompted the plan of what the AI agent would create.
 
----
+One of the tips that I read online by https://x.com/mert/status/2009986072953126935, is to ask the AI agent to first draw a diagram of the architecture. We did that because it’s pretty much aligned with how we would create technical docs of a service. We would draw the architecture diagram of the whole service first.
 
-## The TDD Rhythm: RED → GREEN → REFACTOR
+![Architecture Diagram](vixy%20Vibing%20the%20Ethereum%20EL%20and%20CL%20Proxy/Screenshot_2026-01-15_at_22.24.46.png)
 
-We followed strict TDD throughout:
+By drawing the architecture diagram of the whole service first, we could get a high-level view of how the agent was going to plan everything. We also had the advantage to fix the flow first before the agent was way ahead in the thinking.
 
-### Phase 5: EL Health Check (A Case Study)
+After the diagram looked good, we asked them to continue with explaining the logic and make a step-by-step development plan todo.
 
-**RED Phase** - First, we wrote 17 tests that defined the expected behavior:
+The AGENT.md plan broke everything down into clear phases: project setup, config parsing, health checks, the proxy server itself, metrics, and so on. Each phase had clear deliverables and acceptance criteria. The AI could follow this blueprint autonomously without getting lost.
 
-```rust
-#[test]
-fn test_parse_hex_block_number_with_prefix() {
-    let result = parse_hex_block_number("0x10d4f");
-    assert_eq!(result.unwrap(), 68943);
-}
+## The Guardrails
 
-#[tokio::test]
-async fn test_check_el_node_success() {
-    let mock_server = MockServer::start().await;
-    // ... mock eth_blockNumber response
-    let block_number = check_el_node(&mock_server.uri()).await;
-    assert_eq!(block_number.unwrap(), 68943);
-}
-```
+Even with development plan todos, there are just so many things that could go wrong with long-running AI agents. This is where our experience as software engineers can help as guardrails. Just like what https://x.com/lwastuargo/status/2006193951607578706 said, using modern engineering practices as guardrails is the best way to keep it sane and precise.
 
-Running `cargo test el` showed 17 failures. Perfect—that's exactly what we wanted.
+Here’s the thing about working with AI on code: it’s really good at writing code, but it needs constraints. Not because it sucks, but because without boundaries it’ll just keep going and you’ll end up with a mess. So we borrowed from the playbook of traditional software development and applied it as guardrails.
 
-**GREEN Phase** - Then we implemented just enough code to make tests pass:
+### Tests, Tests, Tests
 
-```rust
-pub fn parse_hex_block_number(hex: &str) -> Result<u64> {
-    let hex_str = hex.strip_prefix("0x").unwrap_or(hex);
-    u64::from_str_radix(hex_str, 16)
-        .wrap_err_with(|| format!("invalid hex number: {hex}"))
-}
-```
+First up was TDD. We told Claude: write the tests first, then make them pass. This is important because tests are the source of truth. When Claude writes code and says “it works,” how do you know? You run the tests. When Claude refactors something, how do you know it didn’t break? Tests still pass.
 
-One by one, tests went green. The rhythm was addictive.
+We wrote 72 unit tests throughout the project. Every feature started with failing tests. Red, green, refactor. This actually caught real bugs, like when unreachable nodes were being marked as healthy because of some weird edge case in our lag calculation. The test failed, we fixed it, moved on.
 
-**REFACTOR Phase** - With passing tests as our safety net, we cleaned up code without fear.
+Then there’s BDD with Cucumber. This was clutch because BDD scenarios are basically plain English specs. “Given an EL node at block 1000, when the health check runs, then it should be marked healthy.” Super clear, no ambiguity. Claude understood exactly what we wanted, and we ended up with 16 scenarios that serve as both tests and documentation.
 
----
+But unit tests with mocks only get you so far. You gotta test against the real thing. So we used [Kurtosis](https://kurtosis.com/) to spin up an actual Ethereum testnet with 4 EL nodes and 4 CL nodes. Ran 15 integration tests against real infrastructure. This caught bugs that unit tests missed, like we weren’t forwarding Content-Type headers and geth was returning HTTP 415. Oops. Fixed it before it ever hit production.
 
-## The Hardships: What Went Wrong
+### Keep a Diary
 
-Building software is never smooth. Here are the challenges we faced:
+Here’s something that people don’t talk about enough: AI has no long-term memory. But also, even within a single session, Claude compacts its memory when the context gets too long. It summarizes what happened earlier to make room for new stuff. This is great for performance, but you lose details.
 
-### The Unreachable Node Bug
+So we kept a DIARY.md. Every bug we hit, every fix we made, every decision we took got documented in real-time. Not at the end of the day, but as we went. Each entry followed a simple structure:
 
-Early in development, we had a subtle bug: unreachable nodes were being marked as healthy.
+- **What I did:** List of tasks completed in this phase
+- **Challenges faced:** Problems that came up
+- **How I solved it:** The actual solutions we implemented
+- **What I learned:** Key takeaways from this phase
+- **Mood:** How we felt (excited, frustrated, accomplished, etc.)
 
-**The Problem:** When a node couldn't be reached, it had `block_number = 0`. The chain head was also `0` (no nodes responding). So the lag calculation was `0 - 0 = 0`, which was within the threshold.
+The diary entries were detailed. Like when we hit the Content-Type header bug during Kurtosis integration testing, the diary captured exactly what failed, how we debugged it, and how we fixed it. When we implemented WebSocket reconnection, it documented all the components we built, the tests we wrote, and the tricky type system issues we solved.
 
-**The Fix:** We added a `check_ok` field to track whether the health check succeeded:
+When Claude’s memory got compacted after hours of work, it could just read the diary and catch up on everything. “Oh right, we already tried that approach and it didn’t work because X.” Without the diary, Claude might suggest the same broken solution again. The diary kept both of us on the same page across the entire 8-hour development session.
 
-```rust
-// Before: is_healthy = lag <= max_lag
-// After:  is_healthy = check_ok && lag <= max_lag
-```
+This became our shared knowledge base. Hit a similar bug? Check the diary. Need to remember why we chose approach A over B? It’s in the diary. Plus, when it came time to write this blog post, we didn’t have to remember anything because it was all already written down. The diary literally wrote itself as we worked.
 
-TDD caught this bug immediately. The test `test_el_node_marked_unhealthy_on_connection_failure` failed, showing us the edge case before it could reach production.
+### Break It Down, Commit Often
 
-### The axum 0.8 Route Syntax Change
+We broke everything into tiny todos. Not “build the proxy server” but “parse incoming HTTP request” and “extract JSON-RPC method” and “select healthy node.” Small, specific tasks. Claude never got lost because it always knew the next immediate step.
 
-We hit a compiler error when setting up routes:
+And we committed after every completed phase. Not massive dumps of code, but digestible chunks. CI ran on every single commit: format check, clippy, tests, BDD scenarios. If anything failed, we stopped and fixed it. No accumulating tech debt, no “we’ll fix it later.” Fix it now or don’t move forward.
 
-```
-error: invalid route syntax `*path`
-```
+By the end we had 15+ commits, each one passing CI, each one a safe rollback point if something went wrong.
 
-axum 0.8 changed wildcard syntax from `*path` to `{*path}`. A quick documentation check revealed the fix. This is the kind of "boring" bug that AI handles well—pattern matching against known issues.
+## The Execution
 
-### The WebSocket Type Mismatch
+With AGENT.md plan and guardrails in place, we just… let Claude cook.
 
-tokio-tungstenite and axum use different types for WebSocket messages. What looked like the same type was actually incompatible:
+We worked phase by phase. Claude wrote tests, implemented features, ran CI, and committed. We guided when needed, clarified ambiguities, and reviewed the output. But mostly, we let it work autonomously.
 
-```rust
-// tungstenite uses its own Utf8Bytes
-// axum uses its own Utf8Bytes
-// They're not the same type!
+It felt less like “using a tool” and more like pair programming with someone who’s really fast at the boring parts but needs you to make the judgment calls.
 
-// Fix: explicit conversion
-Message::Text(text.as_str().into())
-```
-
-Three hours of human debugging compressed into three minutes of AI analysis.
-
----
-
-## BDD: Speaking the Language of Users
-
-Beyond unit tests, we used Cucumber for Behavior-Driven Development:
-
-```gherkin
-Feature: EL (Execution Layer) Health Check
-
-  Scenario: Healthy EL node within lag threshold
-    Given an EL node at block 1000
-    And the EL chain head is at block 1002
-    And the max EL lag is 5 blocks
-    When the health check runs
-    Then the EL node should be marked as healthy
-    And the EL node lag should be 2 blocks
-```
-
-These scenarios served as living documentation. Anyone could read them and understand what Vixy does, without diving into code.
-
-**Final BDD Results:**
-- 3 features (config, EL health, CL health)
-- 16 scenarios
-- 83 steps
-- All passing
-
----
-
-## The Numbers
-
-By the end of development:
-
-| Metric | Count |
-|--------|-------|
-| Unit Tests | 72 |
-| BDD Scenarios | 16 |
-| BDD Steps | 83 |
-| Lines of Rust | ~2,500 |
-| Commits | 15+ |
-| Development Time | ~8 hours |
-
-All tests pass. All CI checks pass. The code is formatted, linted, and ready for production.
-
----
+Some bugs happened. Unreachable nodes marked as healthy, route syntax changes in axum 0.8, WebSocket type mismatches. But the guardrails caught them early. Tests failed, we fixed them, moved on. No big drama.
 
 ## What We Built
 
-Vixy is a production-ready Ethereum proxy with:
+In about 8 hours of work (spread across a day), we shipped Vixy, a production-ready Ethereum proxy that monitors node health, handles automatic failover to backup nodes, proxies both HTTP and WebSocket traffic, and exposes status + metrics endpoints.
 
-- **Health Monitoring** - Tracks block numbers (EL) and slots (CL)
-- **Automatic Failover** - Routes to backup nodes when primaries fail
-- **HTTP Proxy** - `/el` for JSON-RPC, `/cl/*` for Beacon API
-- **WebSocket Proxy** - `/el/ws` for subscriptions
-- **Status Endpoint** - `/status` returns JSON with all node states
-- **Metrics** - `/metrics` for Prometheus
+**The Stats:**
+- 85 unit tests, all passing
+- 33 BDD scenarios (147 steps), all passing
+- 17 integration tests against real Ethereum nodes via Kurtosis
+- 60+ commits, each one passing CI
+- ~4,400 lines of Rust, formatted, linted, documented
+- 8 hours from empty repo to production-ready
 
-### Quick Start
+## What We Learned
 
-```bash
-# Create config
-cp config.example.toml config.toml
+AI is a force multiplier, not a replacement. We still made the architectural decisions, designed the testing strategy, and guided implementation. Claude handled the grunt work (boilerplate, test cases, debugging). It’s like having a fast, thorough junior engineer who never gets tired but needs clear direction.
 
-# Run
-cargo run -- --config config.toml
+Guardrails are non-negotiable. Without TDD, BDD, integration tests, incremental todos, frequent commits, and diary writing, this would’ve gone off the rails. The guardrails aren’t “nice-to-haves,” they’re what make AI development reliable. Vague instructions get you vague results. Clear practices get you clear outcomes.
 
-# Test EL proxy
-curl -X POST http://localhost:8080/el \
-  -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+Good specs enable autonomy. AGENT.md with a clear architecture diagram and phase breakdown let Claude work autonomously for hours. We didn’t micromanage. We set direction, it executed.
 
-# Check status
-curl http://localhost:8080/status
-```
+Documentation is your future self’s best friend. DIARY.md was a knowledge base for both us and Claude. Hit a bug? Check the diary. Need to write a blog post? It’s already documented.
 
----
+## The Bottom Line
 
-## Lessons Learned
+Can you one-shot a production-ready service with AI? **Yes, but only with the right guardrails.**
 
-### 1. TDD is Not Optional
+We didn’t just throw a spec at Claude and hope for the best. We created a detailed plan, enforced strict practices (TDD, BDD, frequent commits), maintained documentation, tested against real systems, and ran CI on every commit.
 
-Every bug we caught early was a bug we didn't debug in production. The 72 unit tests aren't overhead—they're insurance.
+The result: Vixy went from empty repo to production-ready in a single day, with comprehensive test coverage and zero known bugs.
 
-### 2. AI Excels at Pattern Matching
+Is Vixy perfect? No. There’s always more to build. But the foundation is solid, and we can add features incrementally because we built it right the first time.
 
-The AI handled:
-- Boilerplate code generation
-- Error message interpretation
-- Documentation lookups
-- Repetitive test writing
+## Closing Thoughts
 
-Humans (or human-AI collaboration) handled:
-- Architecture decisions
-- Edge case identification
-- "Does this make sense?" questions
+The future of programming isn’t “AI replaces developers.” It’s “AI amplifies developers who know what they’re doing.”
 
-### 3. Good Specifications Enable Autonomy
+Building Vixy proved that AI can be a powerful development partner, but only when paired with solid engineering practices. TDD, BDD, CI/CD, incremental development, and thorough documentation aren’t “old school” practices made obsolete by AI. They’re the foundation that makes AI-assisted development work.
 
-`AGENT.md` was the key. With clear phases, acceptance criteria, and examples, the AI could work independently. Vague instructions produce vague results.
+The best engineers will be those who can architect systems, set constraints, guide execution, and verify quality. AI handles the grunt work. You handle the thinking.
 
-### 4. The Diary Matters
-
-`DIARY.md` captured the journey—not just what was built, but *how*. Every challenge, every fix, every learning. This blog exists because that documentation exists.
+If you want to experiment with this approach, the full source is on GitHub. Clone it, break it, improve it. We’re curious to see what you build.
 
 ---
 
-## Integration Testing with Kurtosis
+*Built with Rust, tested with Cucumber, powered by Claude Code (Opus 4.5) and coffee.*
 
-Unit tests and BDD scenarios are great, but they test against mocks. To truly verify Vixy works, we needed real Ethereum nodes.
+We used Claude Code, Anthropic’s CLI tool, for the entire development process. The ability to work directly in the terminal, maintain context across sessions, and integrate with our existing dev workflow (git, CI, local testing) was crucial. It felt natural, like having another engineer in the terminal with you.
 
-### Enter Kurtosis
+**Repository:** [github.com/chainbound/vixy](https://github.com/chainbound/vixy)
 
-[Kurtosis](https://kurtosis.com/) is a platform for packaging and launching ephemeral backend stacks. With their [ethereum-package](https://github.com/ethpandaops/ethereum-package), we can spin up a complete Ethereum testnet in minutes.
+**License:** MIT / Apache-2.0
 
-Our test setup:
-- **4 EL nodes** (geth) - 2 primary, 2 backup
-- **4 CL nodes** (lighthouse) - for consensus
-- **Minimal preset** - fast block times (2s) for quick testing
+## P.S.
 
-```yaml
-# kurtosis/network_params.yaml
-participants:
-  - el_type: geth
-    cl_type: lighthouse
-    count: 4
+Special shoutout to https://x.com/merklefruit for the idea, https://x.com/mert for the architecture diagram tip, and https://x.com/lwastuargo for reinforcing that guardrails are everything.
 
-network_params:
-  preset: minimal
-  seconds_per_slot: 2
-```
-
-### 15 Integration Scenarios
-
-```bash
-just integration-test
-```
-
-This command:
-1. Starts a Kurtosis enclave with 4 EL/CL pairs
-2. Auto-detects node endpoints and generates Vixy config
-3. Starts Vixy with the generated config
-4. Runs 15 cucumber scenarios against real nodes
-5. Cleans up
-
-**Test coverage:**
-- CL proxy forwarding (health, headers, syncing)
-- EL proxy forwarding (eth_blockNumber, eth_chainId, batches)
-- Single-node failover (stop el-1, verify el-2 handles requests)
-- **Full backup failover** (stop ALL primaries, verify backups take over)
-- Health monitoring (status endpoint, node detection, recovery)
-- Prometheus metrics
-
-### The Backup Failover Test
-
-This is the test that proves Vixy's value:
-
-```gherkin
-Scenario: Proxy uses backup when all primary nodes are down
-  Given all primary EL nodes are stopped
-  When I send an eth_blockNumber request to Vixy
-  Then I should receive a valid block number response
-  And the response should be from a backup node
-```
-
-When we stop el-1 and el-2 (both primaries), Vixy automatically routes to el-3 or el-4 (backups). No manual intervention. No downtime.
-
-### Bugs Found by Integration Tests
-
-Integration tests caught bugs that unit tests missed:
-
-1. **Missing Content-Type header** - The proxy wasn't forwarding the Content-Type header, causing geth to return HTTP 415. Unit tests with mocks didn't catch this.
-
-2. **Beacon node 206 responses** - Lighthouse returns HTTP 206 when syncing, which our tests incorrectly flagged as failure.
-
-Both were fixed before they could impact production.
-
----
-
-## The Future
-
-Vixy is functional, but there's always more to do:
-
-- [ ] Round-robin load balancing
-- [ ] Actual retry logic (infrastructure is in place)
-- [ ] TLS/HTTPS support
-- [ ] CL WebSocket support (events API)
-- [ ] Kubernetes deployment manifests
-
-The foundation is solid. Extensions can be added incrementally, each with their own TDD cycle.
-
----
-
-## Conclusion
-
-Building Vixy demonstrated that AI-assisted development isn't about replacing programmers—it's about amplifying them. The AI wrote tests, implemented functions, and debugged issues. But it did so within a framework designed by humans, following principles established over decades of software engineering.
-
-TDD, BDD, CI/CD, incremental commits—these aren't old-fashioned practices made obsolete by AI. They're the guardrails that make AI development reliable.
-
-The future of programming is collaboration: humans defining *what* and *why*, AI executing *how*, and tests ensuring *correctness*.
-
-Vixy is proof that this future works.
-
----
-
-*Built with Rust, tested with Cucumber, assisted by Claude, powered by coffee and curiosity.*
-
-**Repository:** [github.com/your-repo/vixy](https://github.com/your-repo/vixy)
-
-**License:** MIT
+If you’re in the Ethereum ecosystem and need reliable node infrastructure, give Vixy a shot. And if you’re experimenting with AI-assisted development, remember: the guardrails matter more than the model.
