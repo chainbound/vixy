@@ -162,8 +162,11 @@ To run WSS tests:
 # 1. Start Vixy with WSS test config
 cargo run --release -- --config config.wss-test.toml
 
-# 2. In another terminal, run WSS tests
-cargo test --test integration_cucumber -- --tags @wss
+# 2. In another terminal, run WSS tests only
+VIXY_WSS_ONLY=1 cargo test --test integration_cucumber
+
+# Or use the justfile command
+just test-wss
 ```
 
 Tests:

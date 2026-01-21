@@ -177,7 +177,7 @@ integration-test: build-release
     echo "  - Endpoint unavailability"
     echo ""
 
-    VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber -- --tags @wss --color always
+    VIXY_WSS_ONLY=1 VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber -- --color always
     WSS_TEST_RESULT=$?
 
     echo "==> Stopping Vixy..."
@@ -247,7 +247,7 @@ test-wss: build-release
     echo "  - Endpoint unavailability"
     echo ""
 
-    VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber -- --tags @wss --color always || {
+    VIXY_WSS_ONLY=1 VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber -- --color always || {
         echo ""
         echo "⚠  WSS tests failed - this is expected if public endpoints are unavailable"
         echo "   This does not indicate a problem with the WSS/TLS implementation"

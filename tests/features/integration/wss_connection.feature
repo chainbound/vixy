@@ -5,7 +5,8 @@ Feature: WSS (Secure WebSocket) Connection Support
 
   # To run these tests:
   #   1. Start Vixy: cargo run --release -- --config config.wss-test.toml
-  #   2. Run tests: cargo test --test integration_cucumber -- --tags @wss
+  #   2. Run tests: VIXY_WSS_ONLY=1 cargo test --test integration_cucumber
+  #   Or use: just test-wss
   #
   # Note: These tests use public Hoodi WSS endpoints via publicnode.com (no API key required)
 

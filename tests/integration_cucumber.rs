@@ -55,9 +55,17 @@ async fn main() {
     }
 
     // Run integration cucumber tests with Tokio runtime
-    IntegrationWorld::cucumber()
-        .with_default_cli()
-        // Run only integration features
-        .run("tests/features/integration")
-        .await;
+    let mut runner = IntegrationWorld::cucumber();
+
+    // Check if VIXY_WSS_ONLY is set - only run WSS tests
+    if std::env::var("VIXY_WSS_ONLY").is_ok() {
+        eprintln!("Running WSS tests only (VIXY_WSS_ONLY=1)");
+        runner = runner.filter_run("tests/features/integration", |_, _, scenario| {
+            scenario.tags.iter().any(|tag| tag.to_lowercase() == "wss")
+        });
+    } else {
+        runner = runner.with_default_cli();
+    }
+
+    runner.run("tests/features/integration").await;
 }

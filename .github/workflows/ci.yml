@@ -100,14 +100,14 @@ jobs:
       - name: Run WSS Integration Tests
         run: |
           echo "Running WSS integration tests..."
-          echo "Note: These tests use public Holesky endpoints and may fail due to:"
+          echo "Note: These tests use public Hoodi endpoints and may fail due to:"
           echo "  - Network issues"
           echo "  - Endpoint rate limiting"
           echo "  - Endpoint unavailability"
           echo ""
 
-          # Run the WSS tests
-          cargo test --test integration_cucumber -- --tags @wss || {
+          # Run only WSS tests (filter by @wss tag)
+          VIXY_WSS_ONLY=1 VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber || {
             echo ""
             echo "⚠ WSS tests failed - this is expected if public endpoints are unavailable"
             echo "  This does not indicate a problem with the WSS/TLS implementation"
