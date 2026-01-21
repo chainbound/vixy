@@ -1,6 +1,8 @@
 # Vixy Configuration for WSS Integration Testing
 # This config uses public Holesky WSS endpoints to test secure WebSocket support
 #
+# Note: Uses publicnode.com which provides free public access (no API key required)
+#
 # Usage:
 #   cargo run --release -- --config config.wss-test.toml
 #
@@ -19,19 +21,19 @@ enabled = true
 port = 9090
 
 [el]
-# Primary: Public Holesky WSS endpoint
+# Primary: Public Holesky WSS endpoint (publicnode.com - no key required)
 [[el.primary]]
-name = "publicnode-holesky"
-http_url = "https://ethereum-holesky-rpc.publicnode.com"
-ws_url = "wss://ethereum-holesky-rpc.publicnode.com"
+name = "publicnode-holesky-1"
+http_url = "https://ethereum-hoodi-rpc.publicnode.com"
+ws_url = "wss://ethereum-hoodi-rpc.publicnode.com"
 
-# Backup: Alternative public Holesky endpoint
+# Backup: Same Holesky endpoint for redundancy
 [[el.backup]]
-name = "drpc-holesky-backup"
-http_url = "https://lb.drpc.org/ogrpc?network=holesky&dkey=demo"
-ws_url = "wss://lb.drpc.org/ogws?network=holesky&dkey=demo"
+name = "publicnode-holesky-2"
+http_url = "https://ethereum-hoodi-rpc.publicnode.com"
+ws_url = "wss://ethereum-hoodi-rpc.publicnode.com"
 
-# CL node
+# CL node (Holesky Beacon Chain)
 [[cl]]
 name = "publicnode-holesky-beacon"
-url = "https://ethereum-holesky-beacon-api.publicnode.com"
+url = "https://ethereum-hoodi-beacon-api.publicnode.com"

@@ -171,7 +171,7 @@ Tests:
 - WebSocket connects through Vixy to WSS upstream
 - WebSocket subscription works over WSS
 
-Configuration file: `config.wss-test.toml` (uses public Holesky endpoints)
+Configuration file: `config.wss-test.toml` (uses public Holesky endpoints via publicnode.com - no API key required)
 
 ### EL Proxy Tests (`el_proxy.feature`)
 - Proxy forwards eth_blockNumber request
