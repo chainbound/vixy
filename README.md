@@ -277,9 +277,9 @@ just test-wss
 
 The `integration-test` command runs:
 1. **Kurtosis Tests**: Against a local Ethereum testnet
-2. **WSS Tests**: Against public Holesky endpoints (non-critical, may fail)
+2. **WSS Tests**: Against public Hoodi endpoints (non-critical, may fail)
 
-**Note:** WSS tests use public Holesky endpoints (publicnode.com, no API key required) and failures are non-critical. They verify TLS/WSS support but may fail due to network issues, rate limiting, or endpoint unavailability.
+**Note:** WSS tests use public Hoodi endpoints (publicnode.com, no API key required) and failures are non-critical. They verify TLS/WSS support but may fail due to network issues, rate limiting, or endpoint unavailability.
 
 See [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) for detailed testing documentation.
 

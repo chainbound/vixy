@@ -171,7 +171,7 @@ integration-test: build-release
     done
 
     echo "==> Running WSS integration tests..."
-    echo "Note: Tests use public Holesky endpoints and may fail due to:"
+    echo "Note: Tests use public Hoodi endpoints and may fail due to:"
     echo "  - Network issues"
     echo "  - Endpoint rate limiting"
     echo "  - Endpoint unavailability"
@@ -215,7 +215,7 @@ clean-all: kurtosis-down clean
 # WSS Integration Tests (External)
 # =============================================================================
 
-# Run WSS integration tests (uses public Holesky endpoints)
+# Run WSS integration tests (uses public Hoodi endpoints)
 # Note: May fail if public endpoints are unavailable
 test-wss: build-release
     #!/usr/bin/env bash
@@ -241,7 +241,7 @@ test-wss: build-release
     done
 
     echo "==> Running WSS integration tests..."
-    echo "Note: Tests use public Holesky endpoints and may fail due to:"
+    echo "Note: Tests use public Hoodi endpoints and may fail due to:"
     echo "  - Network issues"
     echo "  - Endpoint rate limiting"
     echo "  - Endpoint unavailability"

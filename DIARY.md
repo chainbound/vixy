@@ -41,7 +41,7 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 **Challenges faced:**
 - Vixy panicked with "Could not automatically determine the process-level CryptoProvider" error
 - Rustls 0.23+ requires explicit crypto provider initialization before any TLS operations
-- WebSocket reconnection to WSS endpoints (like public Holesky WSS endpoints) triggered the panic
+- WebSocket reconnection to WSS endpoints (like public Hoodi WSS endpoints) triggered the panic
 - Needed to create tests that work with external endpoints but don't break the build
 
 **How I solved it:**

@@ -1076,11 +1076,11 @@ async fn verify_same_subscription_id(world: &mut IntegrationWorld) {
 // WSS (Secure WebSocket) Connection Steps
 // =============================================================================
 
-#[given("a public Holesky WSS endpoint is available")]
+#[given("a public Hoodi WSS endpoint is available")]
 async fn public_wss_endpoint_available(world: &mut IntegrationWorld) {
     // This is a precondition check - we assume public endpoints are available
     // If they're not, the subsequent steps will fail gracefully
-    eprintln!("Note: WSS tests depend on external public Holesky endpoints (publicnode.com)");
+    eprintln!("Note: WSS tests depend on external public Hoodi endpoints (publicnode.com)");
 
     // Set default Vixy URL for WSS tests
     if world.vixy_url.is_none() {

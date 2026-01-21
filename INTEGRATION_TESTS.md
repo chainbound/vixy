@@ -155,7 +155,7 @@ network_params:
 Tests are in `tests/features/integration/`:
 
 ### WSS Connection Tests (`wss_connection.feature`)
-**Note:** These tests use public Holesky WSS endpoints and may fail if endpoints are unavailable.
+**Note:** These tests use public Hoodi WSS endpoints and may fail if endpoints are unavailable.
 
 To run WSS tests:
 ```bash
@@ -171,7 +171,7 @@ Tests:
 - WebSocket connects through Vixy to WSS upstream
 - WebSocket subscription works over WSS
 
-Configuration file: `config.wss-test.toml` (uses public Holesky endpoints via publicnode.com - no API key required)
+Configuration file: `config.wss-test.toml` (uses public Hoodi endpoints via publicnode.com - no API key required)
 
 ### EL Proxy Tests (`el_proxy.feature`)
 - Proxy forwards eth_blockNumber request
