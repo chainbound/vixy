@@ -3,6 +3,12 @@ Feature: WSS (Secure WebSocket) Connection Support
   I want to connect to WSS endpoints
   So that I can proxy secure WebSocket connections to encrypted upstream nodes
 
+  # To run these tests:
+  #   1. Start Vixy: cargo run --release -- --config config.wss-test.toml
+  #   2. Run tests: cargo test --test integration_cucumber -- --tags @wss
+  #
+  # Note: These tests use public Holesky endpoints (see config.wss-test.toml)
+
   Background:
     Given a public Holesky WSS endpoint is available
 

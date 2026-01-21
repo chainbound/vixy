@@ -1,0 +1,37 @@
+# Vixy Configuration for WSS Integration Testing
+# This config uses public Holesky WSS endpoints to test secure WebSocket support
+#
+# Usage:
+#   cargo run --release -- --config config.wss-test.toml
+#
+# Then run WSS integration tests:
+#   cargo test --test integration_cucumber -- --tags @wss
+
+[global]
+max_el_lag_blocks = 10
+max_cl_lag_slots = 5
+health_check_interval_ms = 5000
+proxy_timeout_ms = 30000
+max_retries = 2
+
+[metrics]
+enabled = true
+port = 9090
+
+[el]
+# Primary: Public Holesky WSS endpoint
+[[el.primary]]
+name = "publicnode-holesky"
+http_url = "https://ethereum-holesky-rpc.publicnode.com"
+ws_url = "wss://ethereum-holesky-rpc.publicnode.com"
+
+# Backup: Alternative public Holesky endpoint
+[[el.backup]]
+name = "drpc-holesky-backup"
+http_url = "https://lb.drpc.org/ogrpc?network=holesky&dkey=demo"
+ws_url = "wss://lb.drpc.org/ogws?network=holesky&dkey=demo"
+
+# CL node
+[[cl]]
+name = "publicnode-holesky-beacon"
+url = "https://ethereum-holesky-beacon-api.publicnode.com"

@@ -147,6 +147,25 @@ network_params:
 
 Tests are in `tests/features/integration/`:
 
+### WSS Connection Tests (`wss_connection.feature`)
+**Note:** These tests use public Holesky WSS endpoints and may fail if endpoints are unavailable.
+
+To run WSS tests:
+```bash
+# 1. Start Vixy with WSS test config
+cargo run --release -- --config config.wss-test.toml
+
+# 2. In another terminal, run WSS tests
+cargo test --test integration_cucumber -- --tags @wss
+```
+
+Tests:
+- Vixy starts without TLS panics (verifies crypto provider initialization)
+- WebSocket connects through Vixy to WSS upstream
+- WebSocket subscription works over WSS
+
+Configuration file: `config.wss-test.toml` (uses public Holesky endpoints)
+
 ### EL Proxy Tests (`el_proxy.feature`)
 - Proxy forwards eth_blockNumber request
 - Proxy forwards eth_chainId request
