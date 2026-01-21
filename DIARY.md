@@ -75,6 +75,51 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 **Mood:** Accomplished - critical production bug fixed with proper testing coverage!
 
+### 2026-01-21 - Fixed Kurtosis Integration Test Infrastructure
+
+**What I did:**
+- Fixed Kurtosis integration tests that were failing due to ethereum-package version incompatibility
+- Pinned ethereum-package to v6.0.0 to avoid breaking changes from main branch
+- Fixed cucumber test filtering to properly isolate WSS tests from Kurtosis tests
+
+**Challenges faced:**
+- Integration tests failing with "add_service: unexpected keyword argument 'force_update'" error
+- Using ethereum-package from main branch had breaking changes
+- Tried version 3.0.0 but had package name mismatch issues
+- Cucumber test filtering code had type mismatch - treating future as a synchronous value
+
+**How I solved it:**
+1. Pinned ethereum-package to v6.0.0 (latest stable release from January 2026):
+   ```bash
+   kurtosis run github.com/ethpandaops/ethereum-package@6.0.0
+   ```
+2. Fixed test filtering by properly chaining cucumber builder methods:
+   ```rust
+   IntegrationWorld::cucumber()
+       .filter_run("tests/features/integration", |_, _, scenario| {
+           scenario.tags.iter().any(|tag| tag.to_lowercase() == "wss")
+       })
+       .await;
+   ```
+
+**What I learned:**
+- Always pin infrastructure dependencies to specific versions to avoid breaking changes
+- Kurtosis ethereum-package v6.0.0 is the latest stable release (Jan 5, 2026)
+- Cucumber-rs builder methods need to be properly chained, not reassigned
+- The `filter_run` method doesn't return a reassignable `Cucumber` type
+
+**Test Results:**
+- **Kurtosis Integration Tests**: ✅ PASSED - 20 scenarios, 112 steps
+  - EL proxy tests (basic requests, batch, failover, WebSocket)
+  - CL proxy tests (health, headers, syncing, failover)
+  - Health monitoring tests
+- **WSS Integration Tests**: ✅ PASSED - 3 scenarios, 16 steps
+  - TLS initialization without panics
+  - WebSocket connections through Vixy to WSS upstream
+  - WebSocket subscriptions over secure connections
+
+**Mood:** Satisfied - complete integration test suite working end-to-end!
+
 ### 2026-01-15 - WebSocket Health-Aware Reconnection
 
 **What I did:**
