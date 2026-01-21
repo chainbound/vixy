@@ -18,11 +18,17 @@ just integration-test
 ```
 
 This will:
-1. Start a Kurtosis Ethereum testnet
-2. Generate Vixy configuration
-3. Build and start Vixy
-4. Run integration tests
-5. Report results
+1. **Kurtosis Integration Tests:**
+   - Start a Kurtosis Ethereum testnet
+   - Generate Vixy configuration
+   - Build and start Vixy
+   - Run Kurtosis integration tests
+2. **WSS Integration Tests:**
+   - Restart Vixy with public Holesky WSS endpoints
+   - Run WSS/TLS connection tests
+   - Report results (failures are non-critical)
+
+**Note:** WSS test failures do not fail the overall test suite. They may fail due to external endpoint unavailability, which is expected.
 
 ## Prerequisites
 
@@ -96,12 +102,13 @@ just kurtosis-down
 
 | Command | Description |
 |---------|-------------|
+| `just integration-test` | Full workflow (Kurtosis tests + WSS tests) |
 | `just kurtosis-up` | Start Kurtosis testnet and generate config |
 | `just kurtosis-down` | Stop and remove Kurtosis testnet |
 | `just kurtosis-status` | Show Kurtosis enclave status |
 | `just kurtosis-vixy` | Run Vixy with Kurtosis config |
-| `just kurtosis-test` | Run integration tests |
-| `just integration-test` | Full workflow (up → vixy → test) |
+| `just kurtosis-test` | Run Kurtosis integration tests only |
+| `just test-wss` | Run WSS integration tests only |
 | `just clean-all` | Clean everything including Kurtosis |
 
 ## Utility Commands
@@ -146,6 +153,28 @@ network_params:
 ## Integration Test Features
 
 Tests are in `tests/features/integration/`:
+
+### WSS Connection Tests (`wss_connection.feature`)
+**Note:** These tests use public Hoodi WSS endpoints and may fail if endpoints are unavailable.
+
+To run WSS tests:
+```bash
+# 1. Start Vixy with WSS test config
+cargo run --release -- --config config.wss-test.toml
+
+# 2. In another terminal, run WSS tests only
+VIXY_WSS_ONLY=1 cargo test --test integration_cucumber
+
+# Or use the justfile command
+just test-wss
+```
+
+Tests:
+- Vixy starts without TLS panics (verifies crypto provider initialization)
+- WebSocket connects through Vixy to WSS upstream
+- WebSocket subscription works over WSS
+
+Configuration file: `config.wss-test.toml` (uses public Hoodi endpoints via publicnode.com - no API key required)
 
 ### EL Proxy Tests (`el_proxy.feature`)
 - Proxy forwards eth_blockNumber request

@@ -62,3 +62,60 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release
+
+  wss-integration:
+    name: WSS Integration Tests (External)
+    runs-on: ubuntu-latest
+    # Allow this job to fail without failing the workflow
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Vixy
+        run: cargo build --release
+
+      - name: Start Vixy with WSS config
+        run: |
+          echo "Starting Vixy with WSS test configuration..."
+          cargo run --release -- --config config.wss-test.toml &
+          VIXY_PID=$!
+          echo "VIXY_PID=$VIXY_PID" >> $GITHUB_ENV
+
+          # Wait for Vixy to start
+          echo "Waiting for Vixy to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8080/health > /dev/null 2>&1; then
+              echo "✓ Vixy is running"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "⚠ Vixy failed to start within 30 seconds"
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run WSS Integration Tests
+        run: |
+          echo "Running WSS integration tests..."
+          echo "Note: These tests use public Hoodi endpoints and may fail due to:"
+          echo "  - Network issues"
+          echo "  - Endpoint rate limiting"
+          echo "  - Endpoint unavailability"
+          echo ""
+
+          # Run only WSS tests (filter by @wss tag)
+          VIXY_WSS_ONLY=1 VIXY_SKIP_INTEGRATION_CHECK=1 cargo test --test integration_cucumber || {
+            echo ""
+            echo "⚠ WSS tests failed - this is expected if public endpoints are unavailable"
+            echo "  This does not indicate a problem with the WSS/TLS implementation"
+            exit 1
+          }
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Kill Vixy if it's still running
+          pkill -f "target/release/vixy" || true

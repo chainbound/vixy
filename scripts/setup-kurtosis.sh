@@ -91,7 +91,8 @@ else
     echo_step "Starting Kurtosis Ethereum testnet..."
     echo_info "This may take several minutes on first run (downloading images)..."
 
-    kurtosis run github.com/ethpandaops/ethereum-package \
+    # Use the latest stable release (v6.0.0 from January 2026)
+    kurtosis run github.com/ethpandaops/ethereum-package@6.0.0 \
         --enclave "$ENCLAVE_NAME" \
         --args-file "$KURTOSIS_DIR/network_params.yaml"
 

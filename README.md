@@ -259,18 +259,27 @@ just ci
 
 ### Integration Testing
 
-Vixy includes comprehensive integration tests using [Kurtosis](https://docs.kurtosis.com/) to spin up a local Ethereum testnet:
+Vixy includes comprehensive integration tests:
 
 ```bash
-# Setup and run integration tests
+# Run full integration test suite (Kurtosis + WSS tests)
 just integration-test
 
-# Or step-by-step
+# Or step-by-step for Kurtosis tests
 just kurtosis-up      # Start testnet
 just kurtosis-vixy    # Run Vixy
 just kurtosis-test    # Run tests
 just kurtosis-down    # Cleanup
+
+# Or run WSS tests separately
+just test-wss
 ```
+
+The `integration-test` command runs:
+1. **Kurtosis Tests**: Against a local Ethereum testnet
+2. **WSS Tests**: Against public Hoodi endpoints (non-critical, may fail)
+
+**Note:** WSS tests use public Hoodi endpoints (publicnode.com, no API key required) and failures are non-critical. They verify TLS/WSS support but may fail due to network issues, rate limiting, or endpoint unavailability.
 
 See [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) for detailed testing documentation.
 

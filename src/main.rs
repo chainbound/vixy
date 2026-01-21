@@ -34,6 +34,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // Install TLS crypto provider for WebSocket connections (WSS)
+    // This must be done before any TLS operations
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .map_err(|_| eyre::eyre!("Failed to install rustls crypto provider"))?;
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(

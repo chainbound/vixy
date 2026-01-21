@@ -1,0 +1,39 @@
+# Vixy Configuration for WSS Integration Testing
+# This config uses public Hoodi (Ethereum testnet) WSS endpoints to test secure WebSocket support
+#
+# Note: Uses publicnode.com which provides free public access (no API key required)
+#
+# Usage:
+#   cargo run --release -- --config config.wss-test.toml
+#
+# Then run WSS integration tests:
+#   cargo test --test integration_cucumber -- --tags @wss
+
+[global]
+max_el_lag_blocks = 10
+max_cl_lag_slots = 5
+health_check_interval_ms = 5000
+proxy_timeout_ms = 30000
+max_retries = 2
+
+[metrics]
+enabled = true
+port = 9090
+
+[el]
+# Primary: Public Hoodi WSS endpoint (publicnode.com - no key required)
+[[el.primary]]
+name = "publicnode-hoodi-1"
+http_url = "https://ethereum-hoodi-rpc.publicnode.com"
+ws_url = "wss://ethereum-hoodi-rpc.publicnode.com"
+
+# Backup: Same Hoodi endpoint for redundancy
+[[el.backup]]
+name = "publicnode-hoodi-2"
+http_url = "https://ethereum-hoodi-rpc.publicnode.com"
+ws_url = "wss://ethereum-hoodi-rpc.publicnode.com"
+
+# CL node (Hoodi Beacon Chain)
+[[cl]]
+name = "publicnode-hoodi-beacon"
+url = "https://ethereum-hoodi-beacon-api.publicnode.com"
