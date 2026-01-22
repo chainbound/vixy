@@ -393,6 +393,7 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 Vixy depends on various open-source libraries. Their licenses can be found in their respective repositories:
 
+- [prometric](https://github.com/chainbound/prometric) - MIT/Apache-2.0
 - [tokio](https://github.com/tokio-rs/tokio) - MIT License
 - [axum](https://github.com/tokio-rs/axum) - MIT License
 - [reqwest](https://github.com/seanmonstar/reqwest) - MIT/Apache-2.0
