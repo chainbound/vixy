@@ -656,6 +656,7 @@ agent/
 - **AGENT.md** (this file) - Core development guide
 - **DIARY.md** - Ongoing development diary (all sessions)
 - **README.md** - Project documentation
+- **BLOG.md** - Project blog posts and stories (general, not session-specific)
 - **Cargo.toml**, **Justfile**, etc. - Configuration files
 
 ### Example Structure
@@ -665,13 +666,13 @@ vixy/
 ├── AGENT.md                              # ← Core guide (stays in root)
 ├── DIARY.md                              # ← Development log (stays in root)
 ├── README.md                             # ← Project docs (stays in root)
+├── BLOG.md                               # ← Blog posts (stays in root)
 ├── agent/                                # ← Session artifacts folder
 │   └── websocket-reconnection-fix/      # ← Example session
 │       ├── README.md                    # Session summary
 │       ├── WEBSOCKET-RECONNECTION-FIX.md
 │       ├── TESTING-IMPROVEMENTS.md
-│       ├── INTEGRATION_TESTS.md
-│       └── BLOG.md
+│       └── INTEGRATION_TESTS.md
 └── src/                                  # ← Source code
 ```
 
