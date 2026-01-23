@@ -47,7 +47,7 @@ pub fn parse_hex_block_number(hex: &str) -> Result<u64> {
 
 /// Check an EL node's current block number via JSON-RPC
 pub async fn check_el_node(url: &str) -> Result<u64> {
-    // ✅ Issue #3 Fix: Add timeout to prevent health checks from blocking indefinitely
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()

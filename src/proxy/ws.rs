@@ -331,11 +331,11 @@ async fn run_proxy_loop(
     // Track pending subscribe requests: rpc_id -> (params, response_tx)
     let pending_subscribes: Arc<Mutex<PendingSubscribes>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // ✅ Issue #1 Fix: Queue for messages during reconnection
+    // Queue for buffering messages during reconnection to prevent message loss
     let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
     let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
-    // ✅ Fix Finding 2: Track reconnection result receiver across loop iterations
+    // Track reconnection completion across loop iterations (reconnection runs in background)
     let mut reconnect_result_rx: Option<
         oneshot::Receiver<Result<(UpstreamReceiver, UpstreamSender), String>>,
     > = None;
@@ -383,12 +383,11 @@ async fn run_proxy_loop(
                 // Update current node name
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
-                // ✅ Issue #1 Fix (Finding 2): Set reconnecting flag BEFORE spawning task
-                // This allows the main loop to continue and queue messages
+                // Set flag to queue incoming messages during reconnection
                 is_reconnecting.store(true, Ordering::SeqCst);
 
-                // ✅ Fix Finding 2: Spawn reconnection as background task
-                // This allows the main loop to continue processing client messages
+                // Spawn reconnection as background task so main loop can continue processing client messages
+                // Messages sent during reconnection will be queued and replayed after completion
                 let (reconnect_tx, rx) = oneshot::channel();
                 reconnect_result_rx = Some(rx);  // Store receiver for next iteration
 
@@ -423,7 +422,7 @@ async fn run_proxy_loop(
                         upstream_msg_rx = new_upstream_rx;
                         tokio::spawn(upstream_receiver_task(new_receiver, new_upstream_tx));
 
-                        // ✅ Issue #1 Fix: Replay queued messages after successful reconnection
+                        // Replay messages that were queued during reconnection
                         is_reconnecting.store(false, Ordering::SeqCst);
                         let mut queue = message_queue.lock().await;
                         let queued_count = queue.len();
@@ -431,7 +430,7 @@ async fn run_proxy_loop(
                             info!(count = queued_count, "Replaying queued messages after reconnection");
                         }
                         while let Some(queued_msg) = queue.pop_front() {
-                            // Replay each queued message
+                            // Replay each queued message in FIFO order
                             if let Err(should_close) = handle_client_message_internal(
                                 queued_msg,
                                 &upstream_sender,
@@ -454,7 +453,8 @@ async fn run_proxy_loop(
                         // Track failed reconnection attempt
                         VixyMetrics::inc_ws_reconnection_attempt("failed");
 
-                        // ✅ Fix Finding 3: Clear queue AND flag on reconnection failure
+                        // Clear flag and drop queued messages on reconnection failure
+                        // Prevents stale messages from being replayed on next successful reconnect
                         is_reconnecting.store(false, Ordering::SeqCst);
                         let mut queue = message_queue.lock().await;
                         let dropped_count = queue.len();
@@ -615,8 +615,11 @@ async fn handle_client_message_internal(
     Ok(())
 }
 
-/// ✅ Issue #1 Fix: Wrapper that queues messages during reconnection
 /// Handle a message from the client, queuing if reconnecting or forwarding to upstream
+///
+/// During reconnection, messages are queued to prevent loss. After successful reconnection,
+/// queued messages are replayed in FIFO order.
+///
 /// Returns Err(true) if connection should close, Err(false) for recoverable errors
 async fn handle_client_message(
     msg: Message,
@@ -661,8 +664,8 @@ async fn handle_upstream_message(
                         // This is a subscription response
                         let mut pending = pending_subscribes.lock().await;
                         if let Some((params, _)) = pending.remove(&id_str) {
-                            // ✅ Issue #2 Fix (Finding 1): This is a replayed subscription response
-                            // Track it internally but DO NOT forward to client (they already got it)
+                            // This is a replayed subscription response (from reconnection)
+                            // Track it internally but don't forward to client (they already received it)
                             tracker
                                 .lock()
                                 .await
@@ -673,7 +676,7 @@ async fn handle_upstream_message(
                                 "Tracked replayed subscription (not forwarding response)"
                             );
 
-                            // Return early - don't forward this response to client
+                            // Don't forward replayed subscription responses to client
                             return Ok(());
                         }
                     }

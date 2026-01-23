@@ -29,7 +29,7 @@ struct BeaconHeaderMessage {
 
 /// Check if the CL node's health endpoint returns 200
 pub async fn check_cl_health(url: &str) -> Result<bool> {
-    // ✅ Issue #3 Fix: Add timeout to prevent health checks from blocking indefinitely
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
@@ -45,7 +45,7 @@ pub async fn check_cl_health(url: &str) -> Result<bool> {
 
 /// Get the current slot from the CL node's beacon headers endpoint
 pub async fn check_cl_slot(url: &str) -> Result<u64> {
-    // ✅ Issue #3 Fix: Add timeout to prevent health checks from blocking indefinitely
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()

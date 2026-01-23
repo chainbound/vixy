@@ -34,7 +34,8 @@ pub async fn run_health_check_cycle(state: &Arc<AppState>) -> bool {
 ///
 /// Returns true if at least one primary EL node is healthy.
 pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
-    // ✅ Issue #3 Fix: Don't hold write lock during I/O operations
+    // Don't hold write lock during I/O operations to prevent lock contention
+    // Pattern: read lock → concurrent checks → write lock for updates
     // Collect node info with read lock only
     let node_checks: Vec<(String, String)> = {
         let el_nodes = state.el_nodes.read().await;
@@ -133,7 +134,8 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
 
 /// Check all CL nodes and update their state
 pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
-    // ✅ Issue #3 Fix: Don't hold write lock during I/O operations
+    // Don't hold write lock during I/O operations to prevent lock contention
+    // Pattern: read lock → concurrent checks → write lock for updates
     // Collect node info with read lock only
     let node_checks: Vec<(String, String)> = {
         let cl_nodes = state.cl_nodes.read().await;
