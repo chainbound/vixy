@@ -81,12 +81,32 @@ pub fn update_cl_chain_head(nodes: &[ClNodeState]) -> u64 {
 }
 
 /// Calculate health status for a CL node based on chain head and max lag
-pub fn calculate_cl_health(node: &mut ClNodeState, chain_head: u64, max_lag: u64) {
+pub fn calculate_cl_health(
+    node: &mut ClNodeState,
+    chain_head: u64,
+    max_lag: u64,
+    max_failures: u32,
+) {
     // Calculate lag (how far behind the node is from chain head)
     node.lag = chain_head.saturating_sub(node.slot);
 
-    // Node is healthy if health endpoint is OK AND lag is within threshold
-    node.is_healthy = node.health_ok && node.lag <= max_lag;
+    // Determine if this check passed (health endpoint OK AND lag is within threshold)
+    let check_passed = node.health_ok && node.lag <= max_lag;
+
+    if check_passed {
+        // Reset consecutive failures on success
+        node.consecutive_failures = 0;
+        node.is_healthy = true;
+    } else {
+        // Increment consecutive failures
+        node.consecutive_failures += 1;
+
+        // Only mark as unhealthy if we've exceeded the threshold
+        if node.consecutive_failures >= max_failures {
+            node.is_healthy = false;
+        }
+        // Otherwise, keep the current health status (might still be healthy from before)
+    }
 }
 
 #[cfg(test)]
@@ -205,6 +225,7 @@ mod tests {
             health_ok,
             is_healthy: false,
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 
@@ -213,7 +234,7 @@ mod tests {
         let mut node = make_cl_node("test", 1000, true);
         let chain_head = 1005;
 
-        calculate_cl_health(&mut node, chain_head, 10);
+        calculate_cl_health(&mut node, chain_head, 10, 3);
 
         assert_eq!(node.lag, 5, "Lag should be chain_head - slot");
     }
@@ -221,14 +242,32 @@ mod tests {
     #[test]
     fn test_cl_node_unhealthy_when_health_fails() {
         let mut node = make_cl_node("test", 1000, false); // health_ok = false
+        node.is_healthy = true; // Start as healthy
         let chain_head = 1000;
         let max_lag = 3;
 
-        calculate_cl_health(&mut node, chain_head, max_lag);
+        // First failure
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
 
+        // Second failure
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Third failure
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 3);
         assert!(
             !node.is_healthy,
-            "Node should be unhealthy when health_ok is false"
+            "Node should be unhealthy after 3 failures"
         );
         assert_eq!(node.lag, 0);
     }
@@ -236,14 +275,32 @@ mod tests {
     #[test]
     fn test_cl_node_unhealthy_when_lagging() {
         let mut node = make_cl_node("test", 990, true); // health_ok = true
+        node.is_healthy = true; // Start as healthy
         let chain_head = 1000;
         let max_lag = 3;
 
-        calculate_cl_health(&mut node, chain_head, max_lag);
+        // First failure - still healthy
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
 
+        // Second failure - still healthy
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Third failure - now unhealthy
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 3);
         assert!(
             !node.is_healthy,
-            "Node should be unhealthy when lag > max_lag"
+            "Node should be unhealthy after 3 failures"
         );
         assert_eq!(node.lag, 10);
     }
@@ -254,7 +311,7 @@ mod tests {
         let chain_head = 1000;
         let max_lag = 3;
 
-        calculate_cl_health(&mut node, chain_head, max_lag);
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
 
         assert!(
             node.is_healthy,
@@ -269,13 +326,46 @@ mod tests {
         let chain_head = 1000;
         let max_lag = 3;
 
-        calculate_cl_health(&mut node, chain_head, max_lag);
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
 
         assert!(
             node.is_healthy,
             "Node should be healthy when lag == max_lag"
         );
         assert_eq!(node.lag, 3);
+    }
+
+    #[test]
+    fn test_cl_node_consecutive_failures_reset_on_recovery() {
+        let mut node = make_cl_node("test", 990, true);
+        node.is_healthy = true; // Start as healthy
+        let chain_head = 1000;
+        let max_lag = 3;
+
+        // First failure - still healthy
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
+
+        // Second failure - still healthy
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Recovery - node catches up
+        node.slot = 1000;
+        calculate_cl_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(
+            node.consecutive_failures, 0,
+            "Consecutive failures should reset on success"
+        );
+        assert!(node.is_healthy, "Node should be healthy after recovery");
     }
 
     // =========================================================================

@@ -32,6 +32,8 @@ pub struct Global {
     pub proxy_timeout_ms: u64,
     /// Maximum number of retry attempts for failed proxy requests
     pub max_retries: u32,
+    /// Number of consecutive health check failures before marking node as unhealthy
+    pub health_check_max_failures: u32,
 }
 
 /// Metrics configuration settings
@@ -62,6 +64,7 @@ impl Default for Global {
             health_check_interval_ms: 1000,
             proxy_timeout_ms: 30000,
             max_retries: 2,
+            health_check_max_failures: 3,
         }
     }
 }
