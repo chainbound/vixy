@@ -45,14 +45,10 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     };
 
     // Check all nodes concurrently without holding any lock
-    let check_results = future::join_all(
-        node_checks
-            .iter()
-            .map(|(name, url)| async move {
-                let result = el::check_el_node(url).await;
-                (name.clone(), result)
-            }),
-    )
+    let check_results = future::join_all(node_checks.iter().map(|(name, url)| async move {
+        let result = el::check_el_node(url).await;
+        (name.clone(), result)
+    }))
     .await;
 
     // Update node states with write lock (fast, no I/O)
@@ -148,14 +144,10 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
     };
 
     // Check all nodes concurrently without holding any lock
-    let check_results = future::join_all(
-        node_checks
-            .iter()
-            .map(|(name, url)| async move {
-                let result = cl::check_cl_node(url).await;
-                (name.clone(), result)
-            }),
-    )
+    let check_results = future::join_all(node_checks.iter().map(|(name, url)| async move {
+        let result = cl::check_cl_node(url).await;
+        (name.clone(), result)
+    }))
     .await;
 
     // Update node states with write lock (fast, no I/O)

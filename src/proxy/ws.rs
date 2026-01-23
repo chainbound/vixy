@@ -1113,7 +1113,11 @@ mod tests {
 
         // Verify queue is empty initially
         let queue = message_queue.lock().await;
-        assert_eq!(queue.len(), 0, "Queue should be empty when not reconnecting");
+        assert_eq!(
+            queue.len(),
+            0,
+            "Queue should be empty when not reconnecting"
+        );
     }
 
     #[test]
@@ -1121,13 +1125,22 @@ mod tests {
         // Test that the atomic bool works correctly
         let is_reconnecting = Arc::new(AtomicBool::new(false));
 
-        assert!(!is_reconnecting.load(Ordering::SeqCst), "Should start as false");
+        assert!(
+            !is_reconnecting.load(Ordering::SeqCst),
+            "Should start as false"
+        );
 
         is_reconnecting.store(true, Ordering::SeqCst);
-        assert!(is_reconnecting.load(Ordering::SeqCst), "Should be true after store");
+        assert!(
+            is_reconnecting.load(Ordering::SeqCst),
+            "Should be true after store"
+        );
 
         is_reconnecting.store(false, Ordering::SeqCst);
-        assert!(!is_reconnecting.load(Ordering::SeqCst), "Should be false after store");
+        assert!(
+            !is_reconnecting.load(Ordering::SeqCst),
+            "Should be false after store"
+        );
     }
 
     #[tokio::test]
@@ -1148,19 +1161,31 @@ mod tests {
             let mut queue = message_queue.lock().await;
 
             if let Some(Message::Text(msg)) = queue.pop_front() {
-                assert_eq!(msg.as_str(), "first", "First message should be dequeued first");
+                assert_eq!(
+                    msg.as_str(),
+                    "first",
+                    "First message should be dequeued first"
+                );
             } else {
                 panic!("Expected text message");
             }
 
             if let Some(Message::Text(msg)) = queue.pop_front() {
-                assert_eq!(msg.as_str(), "second", "Second message should be dequeued second");
+                assert_eq!(
+                    msg.as_str(),
+                    "second",
+                    "Second message should be dequeued second"
+                );
             } else {
                 panic!("Expected text message");
             }
 
             if let Some(Message::Text(msg)) = queue.pop_front() {
-                assert_eq!(msg.as_str(), "third", "Third message should be dequeued third");
+                assert_eq!(
+                    msg.as_str(),
+                    "third",
+                    "Third message should be dequeued third"
+                );
             } else {
                 panic!("Expected text message");
             }
