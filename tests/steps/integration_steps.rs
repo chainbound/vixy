@@ -1585,14 +1585,25 @@ async fn metrics_should_show_backup(world: &mut IntegrationWorld) {
 
     match client.get(&url).send().await {
         Ok(response) => {
-            if let Ok(_body) = response.text().await {
-                // In a real test, we'd parse the metrics and check specific values
-                eprintln!("✓ Metrics fetched (backup connection assumed)");
+            if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify backup node is connected
+                // Look for ws_upstream_node_connected{node="...-backup"} 1
+                let has_backup_metric = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("backup")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_backup_metric,
+                    "Metrics should show backup node connected. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified backup node connected in metrics");
             } else {
-                eprintln!("⚠ Failed to read metrics body");
+                panic!("Failed to read metrics response body");
             }
         }
-        Err(e) => eprintln!("⚠ Failed to fetch metrics: {e}"),
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
     }
 }
 
@@ -1604,14 +1615,25 @@ async fn metrics_should_show_primary(world: &mut IntegrationWorld) {
 
     match client.get(&url).send().await {
         Ok(response) => {
-            if let Ok(_body) = response.text().await {
-                // In a real test, we'd parse the metrics and verify primary is connected
-                eprintln!("✓ Metrics fetched (primary connection assumed)");
+            if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify primary node is connected
+                // Look for ws_upstream_node_connected{node="...-primary"} 1
+                let has_primary_metric = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("primary")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_primary_metric,
+                    "Metrics should show primary node connected. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified primary node connected in metrics");
             } else {
-                eprintln!("⚠ Failed to read metrics body");
+                panic!("Failed to read metrics response body");
             }
         }
-        Err(e) => eprintln!("⚠ Failed to fetch metrics: {e}"),
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
     }
 }
 

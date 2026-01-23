@@ -336,9 +336,9 @@ async fn run_proxy_loop(
     let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
     // Track reconnection completion across loop iterations (reconnection runs in background)
-    let mut reconnect_result_rx: Option<
-        oneshot::Receiver<Result<(UpstreamReceiver, UpstreamSender), String>>,
-    > = None;
+    // Result includes the old node name for metric cleanup and rollback on failure
+    type ReconnectResult = (Result<(UpstreamReceiver, UpstreamSender), String>, String);
+    let mut reconnect_result_rx: Option<oneshot::Receiver<ReconnectResult>> = None;
 
     loop {
         tokio::select! {
@@ -380,7 +380,10 @@ async fn run_proxy_loop(
                     "Reconnecting WebSocket to new upstream"
                 );
 
-                // Update current node name
+                // Store old node name before changing (needed for rollback on failure)
+                let old_node = current_node_name.lock().await.clone();
+
+                // Update current node name to target node
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
                 // Set flag to queue incoming messages during reconnection
@@ -395,6 +398,7 @@ async fn run_proxy_loop(
                 let tracker_clone = Arc::clone(&tracker);
                 let upstream_sender_clone = Arc::clone(&upstream_sender);
                 let pending_subscribes_clone = Arc::clone(&pending_subscribes);
+                let old_node_clone = old_node.clone();  // Clone for moving into spawn
 
                 tokio::spawn(async move {
                     let result = reconnect_upstream(
@@ -403,14 +407,15 @@ async fn run_proxy_loop(
                         &upstream_sender_clone,
                         &pending_subscribes_clone,
                     ).await;
-                    let _ = reconnect_tx.send(result);
+                    // Include old_node in result for metric cleanup and rollback
+                    let _ = reconnect_tx.send((result, old_node_clone));
                 });
 
                 info!("Reconnection task spawned, main loop continues processing messages");
             }
 
             // Handle reconnection completion (success or failure)
-            Ok(result) = async { reconnect_result_rx.as_mut().unwrap().await }, if reconnect_result_rx.is_some() => {
+            Ok((result, old_node)) = async { reconnect_result_rx.as_mut().unwrap().await }, if reconnect_result_rx.is_some() => {
                 reconnect_result_rx = None;  // Clear receiver after receiving result
                 match result {
                     Ok((new_receiver, new_sender)) => {
@@ -443,6 +448,8 @@ async fn run_proxy_loop(
                         }
 
                         // Update metrics for successful reconnection
+                        // Clear old node metric before setting new node metric
+                        VixyMetrics::set_ws_upstream_node(&old_node, false);
                         VixyMetrics::inc_ws_reconnections();
                         VixyMetrics::inc_ws_reconnection_attempt("success");
                         VixyMetrics::set_ws_upstream_node(&current_node_name.lock().await, true);
@@ -452,6 +459,10 @@ async fn run_proxy_loop(
                     Err(e) => {
                         // Track failed reconnection attempt
                         VixyMetrics::inc_ws_reconnection_attempt("failed");
+
+                        // Revert current_node_name to old node since reconnection failed
+                        // This ensures health monitor and metrics reflect actual connected node
+                        *current_node_name.lock().await = old_node;
 
                         // Clear flag and drop queued messages on reconnection failure
                         // Prevents stale messages from being replayed on next successful reconnect
@@ -1090,22 +1101,6 @@ mod tests {
         // After replay (to be implemented):
         // pending.insert("100".to_string(), (vec![json!("newHeads")], None));
         // assert!(pending.contains_key("100"));
-    }
-
-    // =========================================================================
-    // Issue #5: Health monitor should check for better (primary) nodes
-    // =========================================================================
-
-    #[test]
-    fn test_health_monitor_should_switch_to_better_node() {
-        // This test documents the expected behavior:
-        // The health_monitor should not only check if the current node is unhealthy,
-        // but also check if a better node (e.g., primary when on backup) is available.
-
-        // This will be implemented by modifying health_monitor to call
-        // select_healthy_node and compare with current node.
-
-        // The actual behavior will be tested in integration tests.
     }
 
     // =========================================================================
