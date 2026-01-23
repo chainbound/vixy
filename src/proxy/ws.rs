@@ -336,7 +336,9 @@ async fn run_proxy_loop(
     let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
     // ✅ Fix Finding 2: Track reconnection result receiver across loop iterations
-    let mut reconnect_result_rx: Option<oneshot::Receiver<Result<(UpstreamReceiver, UpstreamSender), String>>> = None;
+    let mut reconnect_result_rx: Option<
+        oneshot::Receiver<Result<(UpstreamReceiver, UpstreamSender), String>>,
+    > = None;
 
     loop {
         tokio::select! {
@@ -666,7 +668,10 @@ async fn handle_upstream_message(
                                 .await
                                 .track_subscribe(params, id.clone(), sub_id);
                             VixyMetrics::inc_ws_subscriptions();
-                            debug!(sub_id, "Tracked replayed subscription (not forwarding response)");
+                            debug!(
+                                sub_id,
+                                "Tracked replayed subscription (not forwarding response)"
+                            );
 
                             // Return early - don't forward this response to client
                             return Ok(());
