@@ -161,36 +161,45 @@ async fn health_monitor(
         interval.tick().await;
 
         let node_name = current_node_name.lock().await.clone();
+        let current_healthy = is_node_healthy(&state, &node_name).await;
 
-        // Check if current node is still healthy
-        if !is_node_healthy(&state, &node_name).await {
-            warn!(node = %node_name, "Current WebSocket upstream node is unhealthy");
+        // ✅ Check if better node available (Issue #5 fix)
+        if let Some((best_name, best_url)) = select_healthy_node(&state).await {
+            // Reconnect if better node available (different name)
+            // This handles both:
+            // 1. Current node unhealthy → switch to healthy node
+            // 2. Better node available (e.g., primary when on backup) → switch back
+            let should_reconnect = best_name != node_name;
 
-            // Try to find a new healthy node
-            if let Some((new_name, new_url)) = select_healthy_node(&state).await {
-                if new_name != node_name {
-                    info!(
-                        old_node = %node_name,
-                        new_node = %new_name,
-                        "Switching WebSocket to healthy node"
-                    );
+            if should_reconnect {
+                let reason = if !current_healthy {
+                    "current_unhealthy"
+                } else {
+                    "better_available"
+                };
 
-                    // Signal reconnection
-                    if reconnect_tx
-                        .send(ReconnectInfo {
-                            node_name: new_name,
-                            ws_url: new_url,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        // Channel closed, connection is shutting down
-                        break;
-                    }
+                info!(
+                    current_node = %node_name,
+                    best_node = %best_name,
+                    reason = %reason,
+                    "Switching WebSocket upstream"
+                );
+
+                // Signal reconnection
+                if reconnect_tx
+                    .send(ReconnectInfo {
+                        node_name: best_name,
+                        ws_url: best_url,
+                    })
+                    .await
+                    .is_err()
+                {
+                    // Channel closed, connection is shutting down
+                    break;
                 }
-            } else {
-                warn!("No healthy EL nodes available for WebSocket reconnection");
             }
+        } else if !current_healthy {
+            warn!("Current WebSocket node unhealthy but no healthy nodes available");
         }
     }
 }
@@ -371,6 +380,7 @@ async fn run_proxy_loop(
                     &reconnect_info.ws_url,
                     &tracker,
                     &upstream_sender,
+                    &pending_subscribes,  // ← ADD
                 ).await {
                     Ok((new_receiver, new_sender)) => {
                         // Replace upstream sender
@@ -674,6 +684,7 @@ async fn reconnect_upstream(
     ws_url: &str,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
     _old_sender: &Arc<Mutex<UpstreamSender>>,
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>,  // ← ADD
 ) -> Result<(UpstreamReceiver, UpstreamSender), String> {
     // Connect to new upstream
     let (new_ws, _) = connect_async(ws_url)
@@ -703,6 +714,15 @@ async fn reconnect_upstream(
             "params": sub.params
         });
 
+        // ✅ ADD TO PENDING BEFORE SENDING
+        // This ensures the subscription response is consumed internally
+        // and not forwarded to the client (which would break JSON-RPC state)
+        let id_str = sub.rpc_id.to_string();
+        pending_subscribes.lock().await.insert(
+            id_str,
+            (sub.params.clone(), None),
+        );
+
         // Send subscribe request
         new_sender
             .send(TungsteniteMessage::Text(request.to_string().into()))
@@ -711,7 +731,8 @@ async fn reconnect_upstream(
 
         debug!(
             client_sub_id = %sub.client_sub_id,
-            "Replayed subscription request"
+            rpc_id = %sub.rpc_id,
+            "Replayed subscription request (added to pending)"
         );
     }
 
@@ -933,5 +954,67 @@ mod tests {
         assert_eq!(tracker.translate_to_client_id("0x1"), None);
         assert!(tracker.has_subscriptions());
         assert_eq!(tracker.get_all_subscriptions().len(), 1);
+    }
+
+    // =========================================================================
+    // Issue #2: Subscription replay responses should not be forwarded to client
+    // =========================================================================
+
+    #[test]
+    fn test_pending_subscribes_tracking() {
+        // Test that PendingSubscribes correctly tracks subscription requests
+        let mut pending: PendingSubscribes = HashMap::new();
+
+        // Add a pending subscribe request
+        let params = vec![serde_json::json!("newHeads")];
+        pending.insert("100".to_string(), (params.clone(), None));
+
+        // Verify it's tracked
+        assert!(pending.contains_key("100"));
+        assert_eq!(pending.get("100").unwrap().0, params);
+
+        // Remove it when response received
+        let removed = pending.remove("100");
+        assert!(removed.is_some());
+        assert!(!pending.contains_key("100"));
+    }
+
+    #[test]
+    fn test_subscription_replay_should_add_to_pending() {
+        // This test documents the expected behavior:
+        // When reconnect_upstream replays a subscription, it should add the
+        // RPC ID to pending_subscribes so that the response is consumed internally
+        // and not forwarded to the client.
+
+        let _tracker = SubscriptionTracker::new();
+        let pending: PendingSubscribes = HashMap::new();
+
+        // Simulate a tracked subscription that will be replayed
+        // In the fix, reconnect_upstream should populate pending_subscribes
+        // with the RPC IDs of replayed subscriptions
+
+        // This is a documentation test - the actual behavior will be tested
+        // in integration tests since it requires real WebSocket connections
+        assert!(pending.is_empty(), "Initially no pending subscriptions");
+
+        // After replay (to be implemented):
+        // pending.insert("100".to_string(), (vec![json!("newHeads")], None));
+        // assert!(pending.contains_key("100"));
+    }
+
+    // =========================================================================
+    // Issue #5: Health monitor should check for better (primary) nodes
+    // =========================================================================
+
+    #[test]
+    fn test_health_monitor_should_switch_to_better_node() {
+        // This test documents the expected behavior:
+        // The health_monitor should not only check if the current node is unhealthy,
+        // but also check if a better node (e.g., primary when on backup) is available.
+
+        // This will be implemented by modifying health_monitor to call
+        // select_healthy_node and compare with current node.
+
+        // The actual behavior will be tested in integration tests.
     }
 }

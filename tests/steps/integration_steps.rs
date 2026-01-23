@@ -1189,7 +1189,7 @@ async fn client_receives_response_within(world: &mut IntegrationWorld, seconds: 
     match tokio::time::timeout(timeout, conn.receiver.next()).await {
         Ok(Some(Ok(WsMessage::Text(text)))) => {
             world.last_response_body = Some(text.to_string());
-            eprintln!("✓ Received response: {}", text);
+            eprintln!("✓ Received response: {text}");
         }
         Ok(Some(Ok(_))) => {
             eprintln!("⚠ Received non-text message");

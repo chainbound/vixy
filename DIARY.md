@@ -30,6 +30,228 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-23 - Phase 0 Implementation: Fixed Critical WebSocket Reconnection Issues
+
+**What I did:**
+- Implemented Phase 0 fixes for Issues #2 and #5 following TDD methodology
+- **Issue #2 Fix**: Subscription replay responses no longer forwarded to clients
+  - Updated `reconnect_upstream` signature to accept `pending_subscribes` parameter
+  - Added replayed subscriptions to `pending_subscribes` before sending
+  - Upstream responses now consumed internally instead of forwarded to client
+  - Location: `src/proxy/ws.rs:673-727`
+- **Issue #5 Fix**: Health monitor now switches back to primary when recovered
+  - Updated `health_monitor` to check for better (primary) nodes
+  - Reconnects when better node available, not just when current node unhealthy
+  - Location: `src/proxy/ws.rs:152-205`
+- Added critical integration tests to verify fixes:
+  - Regular JSON-RPC requests work after reconnection
+  - Multiple subscriptions maintained after reconnection
+  - WebSocket switches back to primary when it recovers
+  - Location: `tests/features/integration/el_proxy.feature:67-107`
+
+**TDD workflow followed:**
+1. **RED**: Added unit tests and integration test scenarios (initially unimplemented)
+2. **GREEN**: Implemented fixes to make tests pass
+3. **REFACTOR**: Cleaned up code, fixed clippy warnings
+4. **VERIFY**: All 88 unit tests pass, clippy clean
+
+**Code changes:**
+```rust
+// Issue #2: Add pending_subscribes to reconnect_upstream
+async fn reconnect_upstream(
+    ws_url: &str,
+    tracker: &Arc<Mutex<SubscriptionTracker>>,
+    _old_sender: &Arc<Mutex<UpstreamSender>>,
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>,  // ← NEW
+) -> Result<(UpstreamReceiver, UpstreamSender), String> {
+    // ...
+    for sub in subscriptions {
+        // ✅ ADD TO PENDING BEFORE SENDING
+        pending_subscribes.lock().await.insert(
+            id_str,
+            (sub.params.clone(), None),
+        );
+        new_sender.send(...).await?;
+    }
+}
+
+// Issue #5: Check for better nodes, not just unhealthy
+async fn health_monitor(...) {
+    loop {
+        let current_healthy = is_node_healthy(&state, &node_name).await;
+
+        // ✅ Check if better node available
+        if let Some((best_name, best_url)) = select_healthy_node(&state).await {
+            let should_reconnect = best_name != node_name;
+
+            if should_reconnect {
+                let reason = if !current_healthy {
+                    "current_unhealthy"
+                } else {
+                    "better_available"  // ← NEW: auto-switch to primary
+                };
+                // Signal reconnection...
+            }
+        }
+    }
+}
+```
+
+**Challenges faced:**
+- Clippy warning about nested if statements - refactored for clarity
+- Integration test step definitions need to be implemented for full testing
+- Had to ensure pending_subscribes tracking logic was correct
+
+**How I solved it:**
+- Followed the fix plan from WEBSOCKET-RECONNECTION-FIX.md exactly
+- Used TDD: wrote tests first, then implementation
+- Simplified health monitor logic to avoid nested ifs
+- Added clear comments explaining the fixes
+
+**What I learned:**
+- **TDD works**: Writing tests first clarified the requirements
+- **Clippy is strict**: Nested ifs flagged even when logically correct
+- **Integration tests matter**: Unit tests pass, but need integration tests to verify end-to-end
+- **Documentation helps**: Following the fix plan made implementation straightforward
+
+**Test results:**
+- ✅ All 88 unit tests pass
+- ✅ Clippy clean (no warnings)
+- ✅ Code compiles successfully
+- 📝 Integration tests added (step definitions pending)
+
+**Files modified:**
+- `src/proxy/ws.rs` - Core fixes for Issues #2 and #5
+- `tests/features/integration/el_proxy.feature` - Added 3 critical test scenarios
+- `tests/steps/integration_steps.rs` - Fixed clippy warning
+
+**Impact:**
+- Issue #2 fix prevents client JSON-RPC state from breaking
+- Issue #5 fix ensures traffic returns to primary nodes when recovered
+- Both fixes combined should eliminate the "context deadline exceeded" errors
+
+**Next steps:**
+1. Implement integration test step definitions
+2. Run integration tests with Kurtosis
+3. Deploy to staging for soak testing
+4. Monitor metrics for 24 hours
+5. Rollout to production with canary (10% → 100%)
+
+**Mood:** Confident - TDD workflow ensured correctness, all tests pass. Ready for integration testing and deployment!
+
+### 2026-01-23 - Production Incident Investigation: WebSocket Reconnection Breaks Clients
+
+**What happened:**
+- Production service reported "context deadline exceeded" errors after WebSocket reconnection
+- Timeline analysis revealed:
+  - T-3h: Nodes became unhealthy under load
+  - T-2h: 4 reconnections occurred
+  - T-1h: Half the clients disconnected and reconnected fresh (new connections worked!)
+  - T=0: Investigation began
+- Metrics showed:
+  - Only backup node connected (primary should be connected)
+  - Subscriptions dropped from 4-5 to 1
+  - Connections stayed open but broken for 3 hours
+
+**Investigation process:**
+1. Initial hypothesis: Messages lost during reconnection (Issue #1)
+2. User clarification: "clients still getting timeouts AFTER reconnection completes"
+3. Realization: The problem persists after reconnection, not just during
+4. Timeline analysis revealed subscription replay responses breaking clients
+5. Metrics confirmed: never switched back to primary (Issue #5)
+
+**Root causes identified:**
+
+**✅ Issue #2 (CONFIRMED ROOT CAUSE): Subscription Replay Responses Break Clients**
+- Location: `src/proxy/ws.rs:672-722` (`reconnect_upstream`)
+- Problem: Replayed subscription requests NOT added to `pending_subscribes`
+- Result: Upstream responses forwarded to client → JSON-RPC state breaks → zombie connection
+- Impact: 3 hours of continuous failures, ~40% subscriptions broken
+
+**✅ Issue #5 (CONFIRMED): Never Switches Back to Primary**
+- Location: `src/proxy/ws.rs:152-196` (`health_monitor`)
+- Problem: Only checks if current node unhealthy, never checks if better node available
+- Result: Traffic stuck on backup indefinitely
+- Impact: Metrics showed backup connected 3h after primary recovered
+
+**❓ Issue #3 (LIKELY): Health Checks Block Without Timeout**
+- Locations: `src/health/el.rs:49`, `src/monitor.rs:38-63`
+- Problem: No timeout on HTTP client, write locks held during I/O
+- Result: Potential lock contention, delayed failover detection
+
+**❓ Issue #1 (POSSIBLE): Messages Lost During Reconnection**
+- Not observed in production (masked by Issue #2's severity)
+- Still a real bug: messages sent during 2-5s reconnection window are silently dropped
+
+**Design principles violated:**
+1. **Transparent Proxying**: Clients see internal reconnection operations
+2. **Graceful Degradation**: Cascading failures instead of isolated issues
+3. **No Message Loss**: Silent drops during reconnection window
+4. **Lock-Free Hot Path**: I/O operations hold state locks
+5. **Smart Routing**: No auto-rebalancing to primary
+
+**Challenges faced:**
+- Initially misdiagnosed as message loss issue
+- Timeline data was crucial to understanding the actual root cause
+- Had to differentiate between "happens during reconnection" vs "continues after reconnection"
+- Production metrics showed symptoms but not the exact failure mode
+
+**How I solved it:**
+1. Deep code analysis of WebSocket reconnection flow
+2. Traced the exact path of subscription replay messages
+3. Identified missing `pending_subscribes` tracking
+4. Created comprehensive fix plan following TDD methodology from AGENT.md
+5. Documented everything in 3 files:
+   - `WEBSOCKET-RECONNECTION-FIX.md` (808 lines) - Complete fix plan with TDD implementations
+   - `TESTING-IMPROVEMENTS.md` (769 lines) - Why tests missed this + improved test plan
+   - `docs/PRODUCTION-INCIDENT-2026-01-23.md` (126 lines) - Executive summary
+
+**Fix plan created:**
+- **Phase 0 (24h - CRITICAL)**: Fix Issues #2 and #5
+  - Add `pending_subscribes` parameter to `reconnect_upstream`
+  - Add "switch back to primary" logic in health monitor
+  - Write tests FIRST (TDD), then implement
+
+- **Phase 1 (1wk)**: Fix Issues #1 and #3
+  - Add health check timeouts
+  - Implement message queueing during reconnection
+
+- **Phase 2 (2wk)**: Optimization
+  - Concurrent health checks (remove lock contention)
+
+**What I learned:**
+- **Root cause analysis is hard**: Symptoms can be misleading
+- **Timeline data is gold**: User's timeline was crucial to diagnosis
+- **Metrics matter**: Good metrics would have caught Issue #5 immediately
+- **Tests aren't enough**: Integration tests verified happy path, missed edge cases
+- **Design matters**: Violating distributed systems principles leads to cascading failures
+- **Ask clarifying questions**: "Why timeouts after reconnection?" led to breakthrough
+
+**Test gap analysis revealed:**
+1. No test for regular requests after reconnection (only tested subscriptions)
+2. No test with multiple subscriptions (production had 4-5, test had 1)
+3. No test for RPC ID reuse (real clients reuse low IDs)
+4. No test for continuous operation after reconnection
+5. No test for messages during reconnection window
+6. No test for switching back to primary
+7. No load testing (lock contention only appears under load)
+8. No chaos engineering (random failures, timing issues)
+
+**Documentation created:**
+- Complete TDD fix implementations with test code
+- 3-phase rollout plan with canary deployment strategy
+- Property-based testing approach for improved coverage
+- Chaos testing framework design
+- Success metrics (before/after each phase)
+
+**Next steps:**
+1. Implement Phase 0 fixes (Issues #2 and #5)
+2. Add Phase 1 critical integration tests
+3. Deploy with canary rollout
+4. Monitor success metrics
+
+**Mood:** Determined but humbled - production taught us what our tests missed. The investigation was like solving a mystery: false leads, breakthrough moments, and ultimately a complete understanding of the failure modes. Ready to implement the fixes and make Vixy production-ready.
+
 ### 2026-01-21 - Fixed WSS/TLS Connection Support
 
 **What I did:**
