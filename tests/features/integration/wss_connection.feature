@@ -1,3 +1,4 @@
+@integration
 Feature: WSS (Secure WebSocket) Connection Support
   As a Vixy operator
   I want to connect to WSS endpoints
