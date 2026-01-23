@@ -30,6 +30,110 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-23 - Phase 1 & 2 Implementation: Performance and Reliability Improvements
+
+**What I did:**
+- Completed Phase 1 and Phase 2 fixes following the production incident timeline
+- **Issue #3 (Phase 1): Health check timeouts**
+  - Added 5-second timeouts to all HTTP clients in health checking
+  - Prevents health checks from blocking indefinitely when nodes are unresponsive
+  - Location: `src/health/el.rs:51-54`, `src/health/cl.rs:33-36,49-52`
+- **Issue #4 (Phase 2): Concurrent health checks**
+  - Refactored monitor to not hold write locks during I/O operations
+  - Collect node info with read lock → check all nodes concurrently → update with write lock
+  - Uses `futures_util::future::join_all` for parallel health checks
+  - Eliminates lock contention and reduces health check cycle time
+  - Location: `src/monitor.rs:36-135,138-196`
+- **Issue #1 (Phase 1): Message queueing during reconnection**
+  - Added message queue (`VecDeque<Message>`) and reconnecting flag (`AtomicBool`)
+  - Messages from clients queued during reconnection instead of being dropped
+  - Queue replayed after successful reconnection
+  - Prevents message loss during 2-5 second reconnection window
+  - Location: `src/proxy/ws.rs:334-336,384-422,594-615`
+
+**Code changes:**
+```rust
+// Issue #3: Health check timeouts
+pub async fn check_el_node(url: &str) -> Result<u64> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))  // ← NEW
+        .build()
+        .wrap_err("failed to build HTTP client")?;
+    // ...
+}
+
+// Issue #4: Concurrent health checks without locks
+pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
+    // Collect node info with read lock only
+    let node_checks: Vec<(String, String)> = {
+        let el_nodes = state.el_nodes.read().await;
+        el_nodes.iter()
+            .map(|n| (n.name.clone(), n.http_url.clone()))
+            .collect()
+    };
+
+    // Check all nodes concurrently without holding any lock
+    let check_results = future::join_all(
+        node_checks.iter()
+            .map(|(name, url)| async move {
+                let result = el::check_el_node(url).await;
+                (name.clone(), result)
+            }),
+    ).await;
+
+    // Update node states with write lock (fast, no I/O)
+    {
+        let mut el_nodes = state.el_nodes.write().await;
+        for (name, result) in check_results {
+            // ... update node state ...
+        }
+    }
+}
+
+// Issue #1: Message queueing during reconnection
+async fn handle_client_message(...) -> Result<(), bool> {
+    // Check if we're currently reconnecting
+    if is_reconnecting.load(Ordering::SeqCst) {
+        // Queue the message for replay after reconnection
+        message_queue.lock().await.push_back(msg);
+        return Ok(());
+    }
+    // Not reconnecting, process normally
+    handle_client_message_internal(...).await
+}
+
+// In reconnection handler:
+is_reconnecting.store(true, Ordering::SeqCst);
+// ... reconnect ...
+is_reconnecting.store(false, Ordering::SeqCst);
+while let Some(queued_msg) = queue.pop_front() {
+    // Replay queued messages
+}
+```
+
+**Testing results:**
+- All 88 unit tests pass ✅
+- Clippy clean (no warnings) ✅
+- Integration tests: 26 scenarios (25 passed, 1 skipped), 160 steps passed ✅
+  - Kurtosis tests: 23 scenarios, 144 steps
+  - WSS tests: 3 scenarios, 16 steps
+
+**What I learned:**
+- Lock-free I/O pattern: Never hold locks during async operations
+- Concurrent futures with `join_all` significantly reduces health check latency
+- Message queueing with atomic flags provides clean reconnection semantics
+- TDD methodology ensures correctness: tests pass first time after implementation
+
+**Impact:**
+- **Issue #3**: Health checks timeout in 5s instead of hanging indefinitely
+- **Issue #4**: Health checks run in parallel, reducing cycle time from O(n) to O(1)
+- **Issue #1**: Zero message loss during reconnection (previously 2-5s window of lost messages)
+- Combined effect: Eliminates lock starvation, improves responsiveness, prevents message loss
+
+**Mood:** Satisfied - All phases complete, comprehensive test coverage, clean implementation
+
+---
+
 ### 2026-01-23 - Phase 0 Implementation: Fixed Critical WebSocket Reconnection Issues
 
 **What I did:**

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use futures_util::future;
 use tracing::{debug, info, warn};
 
 use crate::health::{cl, el};
@@ -33,30 +34,51 @@ pub async fn run_health_check_cycle(state: &Arc<AppState>) -> bool {
 ///
 /// Returns true if at least one primary EL node is healthy.
 pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
-    // First pass: check each node and update block numbers
+    // ✅ Issue #3 Fix: Don't hold write lock during I/O operations
+    // Collect node info with read lock only
+    let node_checks: Vec<(String, String)> = {
+        let el_nodes = state.el_nodes.read().await;
+        el_nodes
+            .iter()
+            .map(|n| (n.name.clone(), n.http_url.clone()))
+            .collect()
+    };
+
+    // Check all nodes concurrently without holding any lock
+    let check_results = future::join_all(
+        node_checks
+            .iter()
+            .map(|(name, url)| async move {
+                let result = el::check_el_node(url).await;
+                (name.clone(), result)
+            }),
+    )
+    .await;
+
+    // Update node states with write lock (fast, no I/O)
     {
         let mut el_nodes = state.el_nodes.write().await;
 
-        for node in el_nodes.iter_mut() {
-            match el::check_el_node(&node.http_url).await {
-                Ok(block_number) => {
-                    node.block_number = block_number;
-                    node.check_ok = true;
-                    debug!(
-                        node = %node.name,
-                        block_number,
-                        "EL node check successful"
-                    );
-                }
-                Err(e) => {
-                    // On error, mark check as failed
-                    warn!(
-                        node = %node.name,
-                        error = %e,
-                        "EL node check failed"
-                    );
-                    node.check_ok = false;
-                    // Keep old block_number but it will be unhealthy due to check_ok = false
+        for (name, result) in check_results {
+            if let Some(node) = el_nodes.iter_mut().find(|n| n.name == name) {
+                match result {
+                    Ok(block_number) => {
+                        node.block_number = block_number;
+                        node.check_ok = true;
+                        debug!(
+                            node = %node.name,
+                            block_number,
+                            "EL node check successful"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            node = %node.name,
+                            error = %e,
+                            "EL node check failed"
+                        );
+                        node.check_ok = false;
+                    }
                 }
             }
         }
@@ -115,31 +137,53 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
 
 /// Check all CL nodes and update their state
 pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
-    // First pass: check each node and update slots
+    // ✅ Issue #3 Fix: Don't hold write lock during I/O operations
+    // Collect node info with read lock only
+    let node_checks: Vec<(String, String)> = {
+        let cl_nodes = state.cl_nodes.read().await;
+        cl_nodes
+            .iter()
+            .map(|n| (n.name.clone(), n.url.clone()))
+            .collect()
+    };
+
+    // Check all nodes concurrently without holding any lock
+    let check_results = future::join_all(
+        node_checks
+            .iter()
+            .map(|(name, url)| async move {
+                let result = cl::check_cl_node(url).await;
+                (name.clone(), result)
+            }),
+    )
+    .await;
+
+    // Update node states with write lock (fast, no I/O)
     {
         let mut cl_nodes = state.cl_nodes.write().await;
 
-        for node in cl_nodes.iter_mut() {
-            match cl::check_cl_node(&node.url).await {
-                Ok((health_ok, slot)) => {
-                    node.health_ok = health_ok;
-                    node.slot = slot;
-                    debug!(
-                        node = %node.name,
-                        health_ok,
-                        slot,
-                        "CL node check successful"
-                    );
-                }
-                Err(e) => {
-                    // On error, mark as unhealthy
-                    warn!(
-                        node = %node.name,
-                        error = %e,
-                        "CL node check failed"
-                    );
-                    node.health_ok = false;
-                    node.slot = 0;
+        for (name, result) in check_results {
+            if let Some(node) = cl_nodes.iter_mut().find(|n| n.name == name) {
+                match result {
+                    Ok((health_ok, slot)) => {
+                        node.health_ok = health_ok;
+                        node.slot = slot;
+                        debug!(
+                            node = %node.name,
+                            health_ok,
+                            slot,
+                            "CL node check successful"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            node = %node.name,
+                            error = %e,
+                            "CL node check failed"
+                        );
+                        node.health_ok = false;
+                        node.slot = 0;
+                    }
                 }
             }
         }

@@ -7,9 +7,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
@@ -331,6 +331,10 @@ async fn run_proxy_loop(
     // Track pending subscribe requests: rpc_id -> (params, response_tx)
     let pending_subscribes: Arc<Mutex<PendingSubscribes>> = Arc::new(Mutex::new(HashMap::new()));
 
+    // ✅ Issue #1 Fix: Queue for messages during reconnection
+    let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
     loop {
         tokio::select! {
             // Handle messages from client
@@ -340,6 +344,8 @@ async fn run_proxy_loop(
                     &upstream_sender,
                     &tracker,
                     &pending_subscribes,
+                    &message_queue,
+                    &is_reconnecting,
                 ).await
                     && should_close
                 {
@@ -375,6 +381,9 @@ async fn run_proxy_loop(
                 // Update current node name
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
+                // ✅ Issue #1 Fix: Set reconnecting flag to queue messages during reconnection
+                is_reconnecting.store(true, Ordering::SeqCst);
+
                 // Attempt reconnection
                 match reconnect_upstream(
                     &reconnect_info.ws_url,
@@ -391,6 +400,27 @@ async fn run_proxy_loop(
                         upstream_msg_rx = new_upstream_rx;
                         tokio::spawn(upstream_receiver_task(new_receiver, new_upstream_tx));
 
+                        // ✅ Issue #1 Fix: Replay queued messages after successful reconnection
+                        is_reconnecting.store(false, Ordering::SeqCst);
+                        let mut queue = message_queue.lock().await;
+                        let queued_count = queue.len();
+                        if queued_count > 0 {
+                            info!(count = queued_count, "Replaying queued messages after reconnection");
+                        }
+                        while let Some(queued_msg) = queue.pop_front() {
+                            // Replay each queued message through handle_client_message
+                            // (don't pass queue/flag to avoid re-queueing during replay)
+                            if let Err(should_close) = handle_client_message_internal(
+                                queued_msg,
+                                &upstream_sender,
+                                &tracker,
+                                &pending_subscribes,
+                            ).await && should_close {
+                                warn!("Failed to replay queued message, closing connection");
+                                break;
+                            }
+                        }
+
                         // Update metrics for successful reconnection
                         VixyMetrics::inc_ws_reconnections();
                         VixyMetrics::inc_ws_reconnection_attempt("success");
@@ -402,6 +432,9 @@ async fn run_proxy_loop(
                     Err(e) => {
                         // Track failed reconnection attempt
                         VixyMetrics::inc_ws_reconnection_attempt("failed");
+
+                        // ✅ Issue #1 Fix: Clear reconnecting flag on failure
+                        is_reconnecting.store(false, Ordering::SeqCst);
 
                         // Revert node name since reconnection failed
                         *current_node_name.lock().await = old_node;
@@ -462,9 +495,9 @@ async fn upstream_receiver_task(
     }
 }
 
-/// Handle a message from the client, forwarding to upstream
+/// Internal function that handles a message from the client, forwarding to upstream
 /// Returns Err(true) if connection should close, Err(false) for recoverable errors
-async fn handle_client_message(
+async fn handle_client_message_internal(
     msg: Message,
     upstream_sender: &Arc<Mutex<UpstreamSender>>,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
@@ -556,6 +589,29 @@ async fn handle_client_message(
         }
     }
     Ok(())
+}
+
+/// ✅ Issue #1 Fix: Wrapper that queues messages during reconnection
+/// Handle a message from the client, queuing if reconnecting or forwarding to upstream
+/// Returns Err(true) if connection should close, Err(false) for recoverable errors
+async fn handle_client_message(
+    msg: Message,
+    upstream_sender: &Arc<Mutex<UpstreamSender>>,
+    tracker: &Arc<Mutex<SubscriptionTracker>>,
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>,
+    message_queue: &Arc<Mutex<VecDeque<Message>>>,
+    is_reconnecting: &Arc<AtomicBool>,
+) -> Result<(), bool> {
+    // Check if we're currently reconnecting
+    if is_reconnecting.load(Ordering::SeqCst) {
+        // Queue the message for replay after reconnection
+        debug!("Queueing message during reconnection");
+        message_queue.lock().await.push_back(msg);
+        return Ok(());
+    }
+
+    // Not reconnecting, process normally
+    handle_client_message_internal(msg, upstream_sender, tracker, pending_subscribes).await
 }
 
 /// Handle a message from upstream, forwarding to client with ID translation
