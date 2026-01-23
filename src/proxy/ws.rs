@@ -1091,7 +1091,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Issue #2: Subscription replay responses should not be forwarded to client
+    // Subscription replay behavior during reconnection
     // =========================================================================
 
     #[test]
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     // =========================================================================
-    // Issue #1: Message queueing during reconnection
+    // Message queueing during reconnection
     // =========================================================================
 
     #[tokio::test]

@@ -1189,7 +1189,7 @@ async fn client_receives_response_within(world: &mut IntegrationWorld, seconds: 
     let conn = world.ws_connection.as_mut().unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
 
-    // Loop through messages, skipping subscription notifications until we get an RPC response
+    // Loop through messages, skipping subscription notifications until we get a valid RPC response
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
@@ -1203,19 +1203,27 @@ async fn client_receives_response_within(world: &mut IntegrationWorld, seconds: 
             Ok(Some(Ok(WsMessage::Text(text)))) => {
                 // Parse to check if this is a subscription notification or RPC response
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                    // Subscription notifications have "method": "eth_subscription"
-                    // RPC responses have "id" field
+                    // Skip subscription notifications (have "method": "eth_subscription")
                     if json.get("method").and_then(|m| m.as_str()) == Some("eth_subscription") {
-                        // This is a subscription notification, skip it
                         eprintln!("  (skipping subscription notification)");
                         continue;
                     }
-                }
 
-                // This is an RPC response (or unrecognized message type)
-                world.last_response_body = Some(text.to_string());
-                eprintln!("✓ Received RPC response: {text}");
-                break;
+                    // Validate this is an RPC response (must have "id" field)
+                    // This prevents accepting subscription confirmations or other messages
+                    if json.get("id").is_none() {
+                        eprintln!("  (skipping message without RPC id field)");
+                        continue;
+                    }
+
+                    // This is a valid RPC response with an id field
+                    world.last_response_body = Some(text.to_string());
+                    eprintln!("✓ Received RPC response: {text}");
+                    break;
+                } else {
+                    eprintln!("⚠ Received invalid JSON, skipping");
+                    continue;
+                }
             }
             Ok(Some(Ok(_))) => {
                 eprintln!("⚠ Received non-text message");
