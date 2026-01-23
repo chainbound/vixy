@@ -684,7 +684,7 @@ async fn reconnect_upstream(
     ws_url: &str,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
     _old_sender: &Arc<Mutex<UpstreamSender>>,
-    pending_subscribes: &Arc<Mutex<PendingSubscribes>>,  // ← ADD
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>, // ← ADD
 ) -> Result<(UpstreamReceiver, UpstreamSender), String> {
     // Connect to new upstream
     let (new_ws, _) = connect_async(ws_url)
@@ -718,10 +718,10 @@ async fn reconnect_upstream(
         // This ensures the subscription response is consumed internally
         // and not forwarded to the client (which would break JSON-RPC state)
         let id_str = sub.rpc_id.to_string();
-        pending_subscribes.lock().await.insert(
-            id_str,
-            (sub.params.clone(), None),
-        );
+        pending_subscribes
+            .lock()
+            .await
+            .insert(id_str, (sub.params.clone(), None));
 
         // Send subscribe request
         new_sender
