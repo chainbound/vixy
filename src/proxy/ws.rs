@@ -704,7 +704,8 @@ async fn handle_upstream_message(
                                 } else {
                                     error!("Replayed subscription missing original client ID");
                                 }
-                                VixyMetrics::inc_ws_subscriptions();
+                                // Note: Don't increment ws_subscriptions metric for replays
+                                // The subscription was already counted when originally created
                                 return Ok(());
                             } else {
                                 // This is a NORMAL subscription response - track and forward to client

@@ -138,13 +138,9 @@ async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
         .build()
         .expect("Failed to build HTTP client");
 
-    // Extract method, headers, and body
+    // Extract method and headers
     let method = request.method().clone();
-    let content_type = request
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(String::from);
+    let headers = request.headers().clone();
 
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -154,11 +150,30 @@ async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
         }
     };
 
-    // Build the forwarded request with Content-Type header
+    // Build the forwarded request with all headers except hop-by-hop headers
     let mut forward_request = client.request(method, target_url);
-    if let Some(ct) = content_type {
-        forward_request = forward_request.header("content-type", ct);
+
+    // Forward all headers except hop-by-hop headers (RFC 2616)
+    // Exclude: Connection, Keep-Alive, Proxy-Authenticate, Proxy-Authorization,
+    //          TE, Trailers, Transfer-Encoding, Upgrade, Host
+    for (name, value) in headers.iter() {
+        let name_str = name.as_str().to_lowercase();
+        if !matches!(
+            name_str.as_str(),
+            "connection"
+                | "keep-alive"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailers"
+                | "transfer-encoding"
+                | "upgrade"
+                | "host"
+        ) {
+            forward_request = forward_request.header(name, value);
+        }
     }
+
     forward_request = forward_request.body(body_bytes);
 
     // Send the request
@@ -182,13 +197,9 @@ async fn forward_request_to_url(request: Request<Body>, target_url: &str) -> Res
         .build()
         .expect("Failed to build HTTP client");
 
-    // Extract method, headers, and body
+    // Extract method and headers
     let method = request.method().clone();
-    let content_type = request
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(String::from);
+    let headers = request.headers().clone();
 
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -198,11 +209,30 @@ async fn forward_request_to_url(request: Request<Body>, target_url: &str) -> Res
         }
     };
 
-    // Build the forwarded request with Content-Type header
+    // Build the forwarded request with all headers except hop-by-hop headers
     let mut forward_request = client.request(method, target_url);
-    if let Some(ct) = content_type {
-        forward_request = forward_request.header("content-type", ct);
+
+    // Forward all headers except hop-by-hop headers (RFC 2616)
+    // Exclude: Connection, Keep-Alive, Proxy-Authenticate, Proxy-Authorization,
+    //          TE, Trailers, Transfer-Encoding, Upgrade, Host
+    for (name, value) in headers.iter() {
+        let name_str = name.as_str().to_lowercase();
+        if !matches!(
+            name_str.as_str(),
+            "connection"
+                | "keep-alive"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailers"
+                | "transfer-encoding"
+                | "upgrade"
+                | "host"
+        ) {
+            forward_request = forward_request.header(name, value);
+        }
     }
+
     if !body_bytes.is_empty() {
         forward_request = forward_request.body(body_bytes);
     }
