@@ -1184,24 +1184,52 @@ async fn client_receives_response_within(world: &mut IntegrationWorld, seconds: 
     }
 
     let conn = world.ws_connection.as_mut().unwrap();
-    let timeout = Duration::from_secs(seconds);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
 
-    match tokio::time::timeout(timeout, conn.receiver.next()).await {
-        Ok(Some(Ok(WsMessage::Text(text)))) => {
-            world.last_response_body = Some(text.to_string());
-            eprintln!("✓ Received response: {text}");
+    // Loop through messages, skipping subscription notifications until we get an RPC response
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            eprintln!(
+                "⚠ Timeout waiting for RPC response (only received subscription notifications)"
+            );
+            break;
         }
-        Ok(Some(Ok(_))) => {
-            eprintln!("⚠ Received non-text message");
-        }
-        Ok(Some(Err(e))) => {
-            eprintln!("⚠ WebSocket error: {e}");
-        }
-        Ok(None) => {
-            eprintln!("⚠ WebSocket connection closed");
-        }
-        Err(_) => {
-            eprintln!("⚠ Timeout waiting for response (upstream may be slow/unavailable)");
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                // Parse to check if this is a subscription notification or RPC response
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    // Subscription notifications have "method": "eth_subscription"
+                    // RPC responses have "id" field
+                    if json.get("method").and_then(|m| m.as_str()) == Some("eth_subscription") {
+                        // This is a subscription notification, skip it
+                        eprintln!("  (skipping subscription notification)");
+                        continue;
+                    }
+                }
+
+                // This is an RPC response (or unrecognized message type)
+                world.last_response_body = Some(text.to_string());
+                eprintln!("✓ Received RPC response: {text}");
+                break;
+            }
+            Ok(Some(Ok(_))) => {
+                eprintln!("⚠ Received non-text message");
+                break;
+            }
+            Ok(Some(Err(e))) => {
+                eprintln!("⚠ WebSocket error: {e}");
+                break;
+            }
+            Ok(None) => {
+                eprintln!("⚠ WebSocket connection closed");
+                break;
+            }
+            Err(_) => {
+                eprintln!("⚠ Timeout waiting for response");
+                break;
+            }
         }
     }
 }
