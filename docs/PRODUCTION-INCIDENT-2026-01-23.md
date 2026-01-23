@@ -11,7 +11,7 @@
 
 ## Documentation
 
-### 1. [WEBSOCKET-RECONNECTION-FIX.md](../WEBSOCKET-RECONNECTION-FIX.md)
+### 1. [WEBSOCKET-RECONNECTION-FIX.md](../agent/websocket-reconnection-fix/WEBSOCKET-RECONNECTION-FIX.md)
 **Complete fix plan with implementation details**
 
 Contains:
@@ -25,7 +25,7 @@ Contains:
 
 ---
 
-### 2. [TESTING-IMPROVEMENTS.md](../TESTING-IMPROVEMENTS.md)
+### 2. [TESTING-IMPROVEMENTS.md](../agent/websocket-reconnection-fix/TESTING-IMPROVEMENTS.md)
 **Why tests didn't catch this + improved test plan**
 
 Contains:
@@ -63,7 +63,7 @@ Contains:
 ## Related Documents
 - [AGENT.md](../AGENT.md) - Original development guide
 - [DIARY.md](../DIARY.md) - Development log
-- [INTEGRATION_TESTS.md](../INTEGRATION_TESTS.md) - Current integration test docs
+- [INTEGRATION_TESTS.md](../agent/websocket-reconnection-fix/INTEGRATION_TESTS.md) - Current integration test docs
 
 ---
 
@@ -123,4 +123,4 @@ T=0:   Investigation begins
 
 ## Next Steps
 
-See [WEBSOCKET-RECONNECTION-FIX.md](../WEBSOCKET-RECONNECTION-FIX.md) for detailed implementation plan.
+See [WEBSOCKET-RECONNECTION-FIX.md](../agent/websocket-reconnection-fix/WEBSOCKET-RECONNECTION-FIX.md) for detailed implementation plan.

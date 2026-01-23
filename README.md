@@ -219,12 +219,12 @@ See [grafana/README.md](grafana/README.md) for full metrics documentation.
 ### User Guide
 - [Configuration Guide](config.example.toml) - Complete configuration reference
 - [Monitoring with Grafana](grafana/README.md) - Setup Grafana dashboards
-- [Integration Testing](INTEGRATION_TESTS.md) - Running integration tests with Kurtosis
+- [Integration Testing](agent/websocket-reconnection-fix/INTEGRATION_TESTS.md) - Running integration tests with Kurtosis
 
 ### Architecture
 - [Agent Design](AGENT.md) - Implementation details and architecture
 - [Development Diary](DIARY.md) - Development log and design decisions
-- [Blog Post](BLOG.md) - Deep dive into Vixy's features
+- [Blog Post](agent/websocket-reconnection-fix/BLOG.md) - Deep dive into Vixy's features
 
 ### API Documentation
 - API docs available at: https://docs.rs/vixy (coming soon)
@@ -281,7 +281,7 @@ The `integration-test` command runs:
 
 **Note:** WSS tests use public Hoodi endpoints (publicnode.com, no API key required) and failures are non-critical. They verify TLS/WSS support but may fail due to network issues, rate limiting, or endpoint unavailability.
 
-See [INTEGRATION_TESTS.md](INTEGRATION_TESTS.md) for detailed testing documentation.
+See [agent/websocket-reconnection-fix/INTEGRATION_TESTS.md](agent/websocket-reconnection-fix/INTEGRATION_TESTS.md) for detailed testing documentation.
 
 ## Monitoring
 
