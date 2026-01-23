@@ -1342,7 +1342,8 @@ async fn no_websocket_errors(world: &mut IntegrationWorld) {
 }
 
 // ============================================================================
-// Phase 0 Critical Test Step Definitions (Issue #2 and #5)
+// WebSocket Reconnection Test Step Definitions
+// Tests subscription ID preservation and primary node failback
 // ============================================================================
 
 #[when("I send eth_blockNumber over WebSocket and receive response")]

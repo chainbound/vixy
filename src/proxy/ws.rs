@@ -168,7 +168,7 @@ async fn health_monitor(
         let node_name = current_node_name.lock().await.clone();
         let current_healthy = is_node_healthy(&state, &node_name).await;
 
-        // ✅ Check if better node available (Issue #5 fix)
+        // Check if a better node is available (prioritizes primary over backup)
         if let Some((best_name, best_url)) = select_healthy_node(&state).await {
             // Reconnect if better node available (different name)
             // This handles both:
