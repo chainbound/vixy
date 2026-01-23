@@ -1354,25 +1354,24 @@ async fn should_not_receive_replay_responses(world: &mut IntegrationWorld) {
         }
     }
 
-    if unexpected_responses.is_empty() {
-        eprintln!("✓ No subscription replay responses received");
-    } else {
-        eprintln!(
-            "⚠ Received {} unexpected subscription replay responses: {:?}",
-            unexpected_responses.len(),
-            unexpected_responses
-        );
-    }
+    assert!(
+        unexpected_responses.is_empty(),
+        "Should NOT receive subscription replay responses. Got {} responses: {:?}",
+        unexpected_responses.len(),
+        unexpected_responses
+    );
+    eprintln!("✓ Verified no subscription replay responses received");
 }
 
 #[then(regex = r"^the response time should be less than (\d+) seconds$")]
-async fn response_time_less_than(world: &mut IntegrationWorld, _seconds: u64) {
+async fn response_time_less_than(world: &mut IntegrationWorld, seconds: u64) {
     // This is tracked by the timeout in the receive step
-    if world.last_response_body.is_some() {
-        eprintln!("✓ Response received within time limit");
-    } else {
-        eprintln!("⚠ No response received or timeout");
-    }
+    assert!(
+        world.last_response_body.is_some(),
+        "Should have received response within {} seconds, but got no response",
+        seconds
+    );
+    eprintln!("✓ Response received within {} second time limit", seconds);
 }
 
 #[when(regex = r"^I subscribe to (.+) with RPC ID (\d+)$")]
@@ -1538,15 +1537,18 @@ async fn should_not_receive_replay_with_ids(world: &mut IntegrationWorld, id1: u
         }
     }
 
-    if unexpected.is_empty() {
-        eprintln!("✓ No unexpected subscription replay responses");
-    } else {
-        eprintln!(
-            "⚠ Received {} unexpected replays: {:?}",
-            unexpected.len(),
-            unexpected
-        );
-    }
+    assert!(
+        unexpected.is_empty(),
+        "Should NOT receive subscription replay responses with IDs {} or {}. Got {} responses: {:?}",
+        id1,
+        id2,
+        unexpected.len(),
+        unexpected
+    );
+    eprintln!(
+        "✓ Verified no subscription replay responses with IDs {} or {}",
+        id1, id2
+    );
 }
 
 #[given("the metrics show primary node connected")]

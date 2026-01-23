@@ -37,7 +37,11 @@ type UpstreamReceiver = futures_util::stream::SplitStream<UpstreamWsStream>;
 type ClientSender = futures_util::stream::SplitSink<WebSocket, Message>;
 
 /// Type alias for pending subscribe requests map
-type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>)>;
+/// Tuple: (params, response_sender, is_replay)
+/// - params: subscription parameters
+/// - response_sender: optional channel to send response back
+/// - is_replay: true if this is a replayed subscription during reconnection (response should not be forwarded to client)
+type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>, bool)>;
 
 // ============================================================================
 // Subscription Tracking for Reconnection
@@ -374,6 +378,15 @@ async fn run_proxy_loop(
 
             // Handle reconnection signal
             Some(reconnect_info) = reconnect_rx.recv() => {
+                // Check if a reconnection is already in progress
+                if reconnect_result_rx.is_some() {
+                    warn!(
+                        new_node = %reconnect_info.node_name,
+                        "Ignoring reconnection request - reconnection already in progress"
+                    );
+                    continue; // Skip this reconnection attempt
+                }
+
                 info!(
                     new_node = %reconnect_info.node_name,
                     new_url = %reconnect_info.ws_url,
@@ -549,14 +562,14 @@ async fn handle_client_message_internal(
                 let rpc_id = json.get("id").cloned();
 
                 if method == Some("eth_subscribe") {
-                    // Track pending subscribe request
+                    // Track pending subscribe request (normal client subscription, not a replay)
                     if let (Some(id), Some(params)) = (rpc_id, json.get("params")) {
                         let id_str = id.to_string();
                         let params_vec = params.as_array().cloned().unwrap_or_default();
                         pending_subscribes
                             .lock()
                             .await
-                            .insert(id_str, (params_vec, None));
+                            .insert(id_str, (params_vec, None, false)); // false = not a replay
                     }
                 } else if method == Some("eth_unsubscribe") {
                     // Handle unsubscribe
@@ -674,21 +687,27 @@ async fn handle_upstream_message(
                     if let Some(sub_id) = result.as_str() {
                         // This is a subscription response
                         let mut pending = pending_subscribes.lock().await;
-                        if let Some((params, _)) = pending.remove(&id_str) {
-                            // This is a replayed subscription response (from reconnection)
-                            // Track it internally but don't forward to client (they already received it)
+                        if let Some((params, _, is_replay)) = pending.remove(&id_str) {
+                            // Track the subscription
                             tracker
                                 .lock()
                                 .await
                                 .track_subscribe(params, id.clone(), sub_id);
                             VixyMetrics::inc_ws_subscriptions();
-                            debug!(
-                                sub_id,
-                                "Tracked replayed subscription (not forwarding response)"
-                            );
 
-                            // Don't forward replayed subscription responses to client
-                            return Ok(());
+                            if is_replay {
+                                // This is a REPLAYED subscription response (from reconnection)
+                                // Client already received the original response, so don't forward again
+                                debug!(
+                                    sub_id,
+                                    "Tracked replayed subscription (not forwarding response)"
+                                );
+                                return Ok(());
+                            } else {
+                                // This is a NORMAL subscription response - forward to client
+                                debug!(sub_id, "Tracked new subscription (forwarding response)");
+                                // Fall through to forward the response
+                            }
                         }
                     }
                 }
@@ -815,14 +834,14 @@ async fn reconnect_upstream(
             "params": sub.params
         });
 
-        // ✅ ADD TO PENDING BEFORE SENDING
-        // This ensures the subscription response is consumed internally
-        // and not forwarded to the client (which would break JSON-RPC state)
+        // Mark this as a replayed subscription
+        // The response will be consumed internally and not forwarded to client
+        // (client already received the original subscription response before reconnection)
         let id_str = sub.rpc_id.to_string();
         pending_subscribes
             .lock()
             .await
-            .insert(id_str, (sub.params.clone(), None));
+            .insert(id_str, (sub.params.clone(), None, true)); // true = this is a replay
 
         // Send subscribe request
         new_sender
@@ -1066,13 +1085,14 @@ mod tests {
         // Test that PendingSubscribes correctly tracks subscription requests
         let mut pending: PendingSubscribes = HashMap::new();
 
-        // Add a pending subscribe request
+        // Add a pending subscribe request (normal subscription, not replay)
         let params = vec![serde_json::json!("newHeads")];
-        pending.insert("100".to_string(), (params.clone(), None));
+        pending.insert("100".to_string(), (params.clone(), None, false));
 
         // Verify it's tracked
         assert!(pending.contains_key("100"));
         assert_eq!(pending.get("100").unwrap().0, params);
+        assert_eq!(pending.get("100").unwrap().2, false); // is_replay = false
 
         // Remove it when response received
         let removed = pending.remove("100");
@@ -1088,19 +1108,21 @@ mod tests {
         // and not forwarded to the client.
 
         let _tracker = SubscriptionTracker::new();
-        let pending: PendingSubscribes = HashMap::new();
+        let mut pending: PendingSubscribes = HashMap::new();
 
-        // Simulate a tracked subscription that will be replayed
-        // In the fix, reconnect_upstream should populate pending_subscribes
-        // with the RPC IDs of replayed subscriptions
+        // Simulate a replayed subscription during reconnection
+        pending.insert(
+            "100".to_string(),
+            (vec![serde_json::json!("newHeads")], None, true),
+        );
 
-        // This is a documentation test - the actual behavior will be tested
-        // in integration tests since it requires real WebSocket connections
-        assert!(pending.is_empty(), "Initially no pending subscriptions");
-
-        // After replay (to be implemented):
-        // pending.insert("100".to_string(), (vec![json!("newHeads")], None));
-        // assert!(pending.contains_key("100"));
+        // Verify it's marked as a replay
+        assert!(pending.contains_key("100"));
+        assert_eq!(
+            pending.get("100").unwrap().2,
+            true,
+            "Should be marked as replay"
+        );
     }
 
     // =========================================================================
