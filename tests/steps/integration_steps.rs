@@ -179,12 +179,15 @@ async fn send_batch_request(world: &mut IntegrationWorld) {
 
 #[then("I should receive a valid block number response")]
 async fn verify_block_number_response(world: &mut IntegrationWorld) {
-    assert_eq!(
-        world.last_status_code,
-        Some(200),
-        "Expected 200 OK, got {:?}",
-        world.last_status_code
-    );
+    // For HTTP calls, check status code
+    // For WebSocket calls, last_status_code won't be set - skip the check
+    if let Some(status) = world.last_status_code {
+        assert_eq!(
+            status, 200,
+            "Expected 200 OK for HTTP response, got {}",
+            status
+        );
+    }
 
     let body = world.last_response_body.as_ref().expect("No response body");
     let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
@@ -1350,8 +1353,10 @@ async fn wait_for_reconnection(_world: &mut IntegrationWorld, seconds: u64) {
 
 #[when("I send eth_blockNumber over WebSocket")]
 async fn send_eth_block_number_ws(world: &mut IntegrationWorld) {
-    // Clear old response to ensure we're validating the new one
+    // Clear old response and status code to ensure we're validating the new one
+    // This prevents asserting on stale HTTP state when this is a WebSocket call
     world.last_response_body = None;
+    world.last_status_code = None;
 
     client_sends_eth_block_number(world).await;
 
@@ -1449,12 +1454,30 @@ async fn receive_confirmation_for_both(world: &mut IntegrationWorld) {
 
     let conn = world.ws_connection.as_mut().unwrap();
     let mut confirmations = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
 
-    // Wait for 2 confirmation messages
-    for _ in 0..2 {
-        match tokio::time::timeout(Duration::from_secs(5), conn.receiver.next()).await {
+    // Keep reading messages until we get 2 confirmations or timeout
+    while confirmations < 2 {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!(
+                "Timeout waiting for subscription confirmations, got {} confirmations",
+                confirmations
+            );
+        }
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
             Ok(Some(Ok(WsMessage::Text(text)))) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    // Check if this is a subscription confirmation (has "result" with subscription ID string)
+                    // Skip subscription notifications (have "method": "eth_subscription")
+                    if json.get("method").is_some() {
+                        eprintln!(
+                            "  (skipping subscription notification while waiting for confirmations)"
+                        );
+                        continue;
+                    }
+
                     if let Some(result) = json.get("result") {
                         if result.is_string() {
                             confirmations += 1;
@@ -1463,9 +1486,21 @@ async fn receive_confirmation_for_both(world: &mut IntegrationWorld) {
                     }
                 }
             }
-            _ => {
-                eprintln!("⚠ Timeout waiting for subscription confirmation");
-                break;
+            Ok(Some(Ok(msg))) => {
+                eprintln!("  (skipping non-text message: {:?})", msg);
+                continue;
+            }
+            Ok(Some(Err(e))) => {
+                panic!("WebSocket error while waiting for confirmations: {}", e);
+            }
+            Ok(None) => {
+                panic!("WebSocket connection closed while waiting for confirmations");
+            }
+            Err(_) => {
+                panic!(
+                    "Timeout waiting for subscription confirmations, got {} confirmations",
+                    confirmations
+                );
             }
         }
     }
@@ -1539,36 +1574,56 @@ async fn receive_block_number_response_with_id(world: &mut IntegrationWorld, rpc
     }
 
     let conn = world.ws_connection.as_mut().unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
 
-    match tokio::time::timeout(Duration::from_secs(5), conn.receiver.next()).await {
-        Ok(Some(Ok(WsMessage::Text(text)))) => {
-            let json: serde_json::Value =
-                serde_json::from_str(&text).expect("Response should be valid JSON");
-
-            let id = json.get("id").expect("Response should have 'id' field");
-
-            assert_eq!(
-                id.as_u64(),
-                Some(rpc_id),
-                "Response should have correct RPC ID {}. Got ID: {}",
-                rpc_id,
-                id
-            );
-
-            world.last_response_body = Some(text.to_string());
-            eprintln!("✓ Received response with correct RPC ID {rpc_id}");
-        }
-        Ok(Some(Ok(msg))) => {
-            panic!("Expected text message, got: {:?}", msg);
-        }
-        Ok(Some(Err(e))) => {
-            panic!("WebSocket error: {}", e);
-        }
-        Ok(None) => {
-            panic!("WebSocket connection closed unexpectedly");
-        }
-        Err(_) => {
+    // Loop through messages, skipping subscription notifications
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
             panic!("Timeout waiting for response with RPC ID {}", rpc_id);
+        }
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let json: serde_json::Value =
+                    serde_json::from_str(&text).expect("Response should be valid JSON");
+
+                // Skip subscription notifications
+                if json.get("method").and_then(|m| m.as_str()) == Some("eth_subscription") {
+                    eprintln!(
+                        "  (skipping subscription notification while waiting for RPC ID {})",
+                        rpc_id
+                    );
+                    continue;
+                }
+
+                // This should be an RPC response - verify ID
+                let id = json.get("id").expect("Response should have 'id' field");
+
+                assert_eq!(
+                    id.as_u64(),
+                    Some(rpc_id),
+                    "Response should have correct RPC ID {}. Got ID: {}",
+                    rpc_id,
+                    id
+                );
+
+                world.last_response_body = Some(text.to_string());
+                eprintln!("✓ Received response with correct RPC ID {rpc_id}");
+                break;
+            }
+            Ok(Some(Ok(msg))) => {
+                panic!("Expected text message, got: {:?}", msg);
+            }
+            Ok(Some(Err(e))) => {
+                panic!("WebSocket error: {}", e);
+            }
+            Ok(None) => {
+                panic!("WebSocket connection closed unexpectedly");
+            }
+            Err(_) => {
+                panic!("Timeout waiting for response with RPC ID {}", rpc_id);
+            }
         }
     }
 }

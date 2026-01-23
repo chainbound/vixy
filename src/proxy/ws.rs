@@ -37,11 +37,12 @@ type UpstreamReceiver = futures_util::stream::SplitStream<UpstreamWsStream>;
 type ClientSender = futures_util::stream::SplitSink<WebSocket, Message>;
 
 /// Type alias for pending subscribe requests map
-/// Tuple: (params, response_sender, is_replay)
+/// Tuple: (params, response_sender, is_replay, original_client_sub_id)
 /// - params: subscription parameters
 /// - response_sender: optional channel to send response back
 /// - is_replay: true if this is a replayed subscription during reconnection (response should not be forwarded to client)
-type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>, bool)>;
+/// - original_client_sub_id: for replayed subscriptions, the original client-facing subscription ID to preserve
+type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>, bool, Option<String>)>;
 
 // ============================================================================
 // Subscription Tracking for Reconnection
@@ -569,7 +570,7 @@ async fn handle_client_message_internal(
                         pending_subscribes
                             .lock()
                             .await
-                            .insert(id_str, (params_vec, None, false)); // false = not a replay
+                            .insert(id_str, (params_vec, None, false, None)); // Not a replay, no original ID
                     }
                 } else if method == Some("eth_unsubscribe") {
                     // Handle unsubscribe
@@ -687,24 +688,31 @@ async fn handle_upstream_message(
                     if let Some(sub_id) = result.as_str() {
                         // This is a subscription response
                         let mut pending = pending_subscribes.lock().await;
-                        if let Some((params, _, is_replay)) = pending.remove(&id_str) {
-                            // Track the subscription
-                            tracker
-                                .lock()
-                                .await
-                                .track_subscribe(params, id.clone(), sub_id);
-                            VixyMetrics::inc_ws_subscriptions();
-
+                        if let Some((params, _, is_replay, original_client_sub_id)) =
+                            pending.remove(&id_str)
+                        {
                             if is_replay {
                                 // This is a REPLAYED subscription response (from reconnection)
-                                // Client already received the original response, so don't forward again
-                                debug!(
-                                    sub_id,
-                                    "Tracked replayed subscription (not forwarding response)"
-                                );
+                                // Map the new upstream subscription ID to the original client subscription ID
+                                if let Some(original_id) = original_client_sub_id {
+                                    tracker.lock().await.map_upstream_id(sub_id, &original_id);
+                                    debug!(
+                                        new_upstream_id = sub_id,
+                                        original_client_id = original_id,
+                                        "Mapped replayed subscription ID (not forwarding response)"
+                                    );
+                                } else {
+                                    error!("Replayed subscription missing original client ID");
+                                }
+                                VixyMetrics::inc_ws_subscriptions();
                                 return Ok(());
                             } else {
-                                // This is a NORMAL subscription response - forward to client
+                                // This is a NORMAL subscription response - track and forward to client
+                                tracker
+                                    .lock()
+                                    .await
+                                    .track_subscribe(params, id.clone(), sub_id);
+                                VixyMetrics::inc_ws_subscriptions();
                                 debug!(sub_id, "Tracked new subscription (forwarding response)");
                                 // Fall through to forward the response
                             }
@@ -837,11 +845,17 @@ async fn reconnect_upstream(
         // Mark this as a replayed subscription
         // The response will be consumed internally and not forwarded to client
         // (client already received the original subscription response before reconnection)
+        // Include the original client subscription ID so we can map the new upstream ID to it
         let id_str = sub.rpc_id.to_string();
-        pending_subscribes
-            .lock()
-            .await
-            .insert(id_str, (sub.params.clone(), None, true)); // true = this is a replay
+        pending_subscribes.lock().await.insert(
+            id_str,
+            (
+                sub.params.clone(),
+                None,
+                true,                            // is_replay = true
+                Some(sub.client_sub_id.clone()), // original client subscription ID
+            ),
+        );
 
         // Send subscribe request
         new_sender
@@ -1087,7 +1101,7 @@ mod tests {
 
         // Add a pending subscribe request (normal subscription, not replay)
         let params = vec![serde_json::json!("newHeads")];
-        pending.insert("100".to_string(), (params.clone(), None, false));
+        pending.insert("100".to_string(), (params.clone(), None, false, None));
 
         // Verify it's tracked
         assert!(pending.contains_key("100"));
@@ -1113,7 +1127,12 @@ mod tests {
         // Simulate a replayed subscription during reconnection
         pending.insert(
             "100".to_string(),
-            (vec![serde_json::json!("newHeads")], None, true),
+            (
+                vec![serde_json::json!("newHeads")],
+                None,
+                true,
+                Some("original-id".to_string()),
+            ),
         );
 
         // Verify it's marked as a replay
