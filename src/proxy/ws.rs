@@ -11,7 +11,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use tracing::{debug, error, info, warn};
 
@@ -335,6 +335,9 @@ async fn run_proxy_loop(
     let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
     let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
+    // ✅ Fix Finding 2: Track reconnection result receiver across loop iterations
+    let mut reconnect_result_rx: Option<oneshot::Receiver<Result<(UpstreamReceiver, UpstreamSender), String>>> = None;
+
     loop {
         tokio::select! {
             // Handle messages from client
@@ -375,22 +378,40 @@ async fn run_proxy_loop(
                     "Reconnecting WebSocket to new upstream"
                 );
 
-                // Get old node name for metrics before updating
-                let old_node = current_node_name.lock().await.clone();
-
                 // Update current node name
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
-                // ✅ Issue #1 Fix: Set reconnecting flag to queue messages during reconnection
+                // ✅ Issue #1 Fix (Finding 2): Set reconnecting flag BEFORE spawning task
+                // This allows the main loop to continue and queue messages
                 is_reconnecting.store(true, Ordering::SeqCst);
 
-                // Attempt reconnection
-                match reconnect_upstream(
-                    &reconnect_info.ws_url,
-                    &tracker,
-                    &upstream_sender,
-                    &pending_subscribes,  // ← ADD
-                ).await {
+                // ✅ Fix Finding 2: Spawn reconnection as background task
+                // This allows the main loop to continue processing client messages
+                let (reconnect_tx, rx) = oneshot::channel();
+                reconnect_result_rx = Some(rx);  // Store receiver for next iteration
+
+                let ws_url = reconnect_info.ws_url.clone();
+                let tracker_clone = Arc::clone(&tracker);
+                let upstream_sender_clone = Arc::clone(&upstream_sender);
+                let pending_subscribes_clone = Arc::clone(&pending_subscribes);
+
+                tokio::spawn(async move {
+                    let result = reconnect_upstream(
+                        &ws_url,
+                        &tracker_clone,
+                        &upstream_sender_clone,
+                        &pending_subscribes_clone,
+                    ).await;
+                    let _ = reconnect_tx.send(result);
+                });
+
+                info!("Reconnection task spawned, main loop continues processing messages");
+            }
+
+            // Handle reconnection completion (success or failure)
+            Ok(result) = async { reconnect_result_rx.as_mut().unwrap().await }, if reconnect_result_rx.is_some() => {
+                reconnect_result_rx = None;  // Clear receiver after receiving result
+                match result {
                     Ok((new_receiver, new_sender)) => {
                         // Replace upstream sender
                         *upstream_sender.lock().await = new_sender;
@@ -408,8 +429,7 @@ async fn run_proxy_loop(
                             info!(count = queued_count, "Replaying queued messages after reconnection");
                         }
                         while let Some(queued_msg) = queue.pop_front() {
-                            // Replay each queued message through handle_client_message
-                            // (don't pass queue/flag to avoid re-queueing during replay)
+                            // Replay each queued message
                             if let Err(should_close) = handle_client_message_internal(
                                 queued_msg,
                                 &upstream_sender,
@@ -424,8 +444,7 @@ async fn run_proxy_loop(
                         // Update metrics for successful reconnection
                         VixyMetrics::inc_ws_reconnections();
                         VixyMetrics::inc_ws_reconnection_attempt("success");
-                        VixyMetrics::set_ws_upstream_node(&old_node, false);
-                        VixyMetrics::set_ws_upstream_node(&reconnect_info.node_name, true);
+                        VixyMetrics::set_ws_upstream_node(&current_node_name.lock().await, true);
 
                         info!("WebSocket reconnection successful");
                     }
@@ -433,11 +452,14 @@ async fn run_proxy_loop(
                         // Track failed reconnection attempt
                         VixyMetrics::inc_ws_reconnection_attempt("failed");
 
-                        // ✅ Issue #1 Fix: Clear reconnecting flag on failure
+                        // ✅ Fix Finding 3: Clear queue AND flag on reconnection failure
                         is_reconnecting.store(false, Ordering::SeqCst);
-
-                        // Revert node name since reconnection failed
-                        *current_node_name.lock().await = old_node;
+                        let mut queue = message_queue.lock().await;
+                        let dropped_count = queue.len();
+                        queue.clear();
+                        if dropped_count > 0 {
+                            warn!(count = dropped_count, "Dropped queued messages due to reconnection failure");
+                        }
 
                         error!(error = %e, "Failed to reconnect WebSocket upstream");
                         // Continue with old connection (if still working)
@@ -637,13 +659,17 @@ async fn handle_upstream_message(
                         // This is a subscription response
                         let mut pending = pending_subscribes.lock().await;
                         if let Some((params, _)) = pending.remove(&id_str) {
-                            // Track the subscription
+                            // ✅ Issue #2 Fix (Finding 1): This is a replayed subscription response
+                            // Track it internally but DO NOT forward to client (they already got it)
                             tracker
                                 .lock()
                                 .await
                                 .track_subscribe(params, id.clone(), sub_id);
                             VixyMetrics::inc_ws_subscriptions();
-                            debug!(sub_id, "Tracked new subscription");
+                            debug!(sub_id, "Tracked replayed subscription (not forwarding response)");
+
+                            // Return early - don't forward this response to client
+                            return Ok(());
                         }
                     }
                 }
