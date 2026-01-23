@@ -22,6 +22,7 @@ fn make_cl_node(name: &str, slot: u64, health_ok: bool) -> ClNodeState {
         health_ok,
         is_healthy: false,
         lag: 0,
+        consecutive_failures: 0,
     }
 }
 
@@ -101,7 +102,7 @@ fn when_health_check_runs(world: &mut VixyWorld) {
 
         // Calculate health for each EL node
         for node in world.el_nodes.iter_mut() {
-            calculate_el_health(node, world.el_chain_head, world.max_el_lag);
+            calculate_el_health(node, world.el_chain_head, world.max_el_lag, 3);
         }
     }
 
@@ -114,7 +115,7 @@ fn when_health_check_runs(world: &mut VixyWorld) {
 
         // Calculate health for each CL node
         for node in world.cl_nodes.iter_mut() {
-            calculate_cl_health(node, world.cl_chain_head, world.max_cl_lag);
+            calculate_cl_health(node, world.cl_chain_head, world.max_cl_lag, 3);
         }
     }
 }

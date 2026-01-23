@@ -30,6 +30,50 @@ A log of the development journey building Vixy - an Ethereum EL/CL proxy in Rust
 
 <!-- Add new entries below this line, newest first -->
 
+### 2026-01-23 - Configurable Health Check Retry Logic
+
+**What I did:**
+- Added configurable health check retry logic to prevent nodes from being marked unhealthy on transient failures
+- Added `health_check_max_failures` config field to Global struct (default: 3)
+- Added `consecutive_failures` tracking to both ElNodeState and ClNodeState
+- Updated health calculation functions to only mark nodes unhealthy after X consecutive failures
+- Nodes reset their failure counter when they recover
+- Updated all test code to work with the new logic
+- Added comprehensive tests for retry and recovery scenarios
+
+**Key Implementation Details:**
+- Config field: `health_check_max_failures` in `[global]` section
+- Node state tracking: `consecutive_failures: u32` field
+- Health calculation logic:
+  - If check passes: reset consecutive_failures to 0, mark as healthy
+  - If check fails: increment consecutive_failures
+  - Only mark unhealthy if consecutive_failures >= threshold
+- Updated function signatures: `calculate_el_health(node, chain_head, max_lag, max_failures)`
+
+**Tests Added:**
+- test_el_node_consecutive_failures_reset_on_recovery
+- test_cl_node_consecutive_failures_reset_on_recovery
+- Updated existing tests to verify retry behavior (3 failures before unhealthy)
+
+**Challenges faced:**
+- Had to update all test helpers across multiple modules (http.rs, selection.rs, ws.rs, monitor.rs)
+- Needed to ensure the retry logic works correctly for both EL and CL nodes
+- Had to update both health check functions and all test code simultaneously
+
+**How I solved it:**
+- Added the consecutive_failures field to both node state structs
+- Modified health calculation to track failures and only mark unhealthy after threshold
+- Updated all test helpers to include the new fields
+- Updated tests to verify the retry behavior works correctly
+
+**What I learned:**
+- Rust's type system makes refactoring safe - compiler caught all missing fields
+- Configurable retry logic prevents flapping between healthy/unhealthy states
+- Resetting the counter on success allows nodes to recover naturally
+- Comprehensive tests ensure the retry logic works as expected
+
+**Mood:** Accomplished - this is a valuable feature for production resilience!
+
 ### 2026-01-21 - Fixed WSS/TLS Connection Support
 
 **What I did:**

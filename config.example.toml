@@ -17,6 +17,10 @@ proxy_timeout_ms = 30000
 # Maximum number of retry attempts for failed proxy requests
 max_retries = 2
 
+# Number of consecutive health check failures before marking node as unhealthy
+# This prevents transient failures from immediately marking a node as unhealthy
+health_check_max_failures = 3
+
 [metrics]
 # Enable or disable Prometheus metrics
 enabled = true
