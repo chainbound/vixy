@@ -214,12 +214,6 @@ Similar fixes for the other two test steps.
 5. **Prevent concurrent reconnections** - check if already in progress (ws.rs:382-388)
 6. **Assert in negative tests** - fail tests when conditions not met (integration_steps.rs)
 
-### Testing
-- ✅ All 91 unit tests pass
-- ✅ All 16 BDD scenarios pass
-- ✅ Clippy clean (no warnings)
-- ✅ Formatting correct
-
 ## Architectural Improvements
 
 The fixes improve correctness and reliability:

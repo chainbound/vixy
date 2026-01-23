@@ -1434,11 +1434,12 @@ async fn receive_confirmation_for_both(world: &mut IntegrationWorld) {
         }
     }
 
-    if confirmations == 2 {
-        eprintln!("✓ Both subscriptions confirmed");
-    } else {
-        eprintln!("⚠ Only received {confirmations}/2 confirmations");
-    }
+    assert_eq!(
+        confirmations, 2,
+        "Should receive confirmation for both subscriptions, got {} confirmations",
+        confirmations
+    );
+    eprintln!("✓ Both subscriptions confirmed");
 }
 
 #[then("both subscriptions should still be active")]
@@ -1483,28 +1484,41 @@ async fn send_eth_block_number_with_id(world: &mut IntegrationWorld, rpc_id: u64
 #[then(regex = r"^I should receive block number response with RPC ID (\d+)$")]
 async fn receive_block_number_response_with_id(world: &mut IntegrationWorld, rpc_id: u64) {
     if world.ws_connection.is_none() {
-        eprintln!("⚠ Skipping - WebSocket not connected");
-        return;
+        panic!("WebSocket not connected - cannot receive response");
     }
 
     let conn = world.ws_connection.as_mut().unwrap();
 
     match tokio::time::timeout(Duration::from_secs(5), conn.receiver.next()).await {
         Ok(Some(Ok(WsMessage::Text(text)))) => {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if let Some(id) = json.get("id") {
-                    if id.as_u64() == Some(rpc_id) {
-                        eprintln!("✓ Received response with correct RPC ID {rpc_id}");
-                        world.last_response_body = Some(text.to_string());
-                    } else {
-                        eprintln!("⚠ Received response with wrong ID: {id}");
-                    }
-                } else {
-                    eprintln!("⚠ Response missing ID field");
-                }
-            }
+            let json: serde_json::Value =
+                serde_json::from_str(&text).expect("Response should be valid JSON");
+
+            let id = json.get("id").expect("Response should have 'id' field");
+
+            assert_eq!(
+                id.as_u64(),
+                Some(rpc_id),
+                "Response should have correct RPC ID {}. Got ID: {}",
+                rpc_id,
+                id
+            );
+
+            world.last_response_body = Some(text.to_string());
+            eprintln!("✓ Received response with correct RPC ID {rpc_id}");
         }
-        _ => eprintln!("⚠ Timeout or error receiving response"),
+        Ok(Some(Ok(msg))) => {
+            panic!("Expected text message, got: {:?}", msg);
+        }
+        Ok(Some(Err(e))) => {
+            panic!("WebSocket error: {}", e);
+        }
+        Ok(None) => {
+            panic!("WebSocket connection closed unexpectedly");
+        }
+        Err(_) => {
+            panic!("Timeout waiting for response with RPC ID {}", rpc_id);
+        }
     }
 }
 
@@ -1560,15 +1574,24 @@ async fn metrics_show_primary_connected(world: &mut IntegrationWorld) {
     match client.get(&url).send().await {
         Ok(response) => {
             if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify primary node is connected
                 // Look for ws_upstream_node_connected{node="...-primary"} 1
-                if body.contains("ws_upstream_node_connected") {
-                    eprintln!("✓ Metrics endpoint accessible");
-                } else {
-                    eprintln!("⚠ Metrics don't show WebSocket upstream info");
-                }
+                let has_primary_connected = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("primary")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_primary_connected,
+                    "Metrics should show primary node connected as precondition. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified primary node connected in metrics");
+            } else {
+                panic!("Failed to read metrics response body");
             }
         }
-        Err(e) => eprintln!("⚠ Failed to fetch metrics: {e}"),
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
     }
 }
 
@@ -1641,11 +1664,11 @@ async fn metrics_should_show_primary(world: &mut IntegrationWorld) {
 
 #[then("the WebSocket connection should still work")]
 async fn websocket_should_still_work(world: &mut IntegrationWorld) {
-    if world.ws_connected {
-        eprintln!("✓ WebSocket connection still active");
-    } else {
-        eprintln!("⚠ WebSocket connection not active");
-    }
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should still be active but is down"
+    );
+    eprintln!("✓ Verified WebSocket connection still active");
 }
 
 #[then("I should receive notifications without interruption")]
