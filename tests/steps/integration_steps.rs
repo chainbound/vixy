@@ -1314,7 +1314,7 @@ async fn send_eth_block_number_and_receive(world: &mut IntegrationWorld) {
 }
 
 #[when(regex = r"^I wait (\d+) seconds for reconnection to complete$")]
-async fn wait_for_reconnection(world: &mut IntegrationWorld, seconds: u64) {
+async fn wait_for_reconnection(_world: &mut IntegrationWorld, seconds: u64) {
     eprintln!("⏱  Waiting {seconds}s for reconnection to complete...");
     tokio::time::sleep(Duration::from_secs(seconds)).await;
     eprintln!("✓ Wait complete");
@@ -1510,11 +1510,7 @@ async fn receive_block_number_response_with_id(world: &mut IntegrationWorld, rpc
 }
 
 #[then(regex = r"^I should NOT receive subscription replay responses with IDs (\d+) or (\d+)$")]
-async fn should_not_receive_replay_with_ids(
-    world: &mut IntegrationWorld,
-    id1: u64,
-    id2: u64,
-) {
+async fn should_not_receive_replay_with_ids(world: &mut IntegrationWorld, id1: u64, id2: u64) {
     if world.ws_connection.is_none() {
         eprintln!("⚠ Skipping - WebSocket not connected");
         return;
@@ -1530,10 +1526,10 @@ async fn should_not_receive_replay_with_ids(
             Ok(Some(Ok(WsMessage::Text(text)))) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                     if let Some(id) = json.get("id") {
-                        if id.as_u64() == Some(id1) || id.as_u64() == Some(id2) {
-                            if json.get("result").is_some() {
-                                unexpected.push(json);
-                            }
+                        if (id.as_u64() == Some(id1) || id.as_u64() == Some(id2))
+                            && json.get("result").is_some()
+                        {
+                            unexpected.push(json);
                         }
                     }
                 }
@@ -1545,7 +1541,11 @@ async fn should_not_receive_replay_with_ids(
     if unexpected.is_empty() {
         eprintln!("✓ No unexpected subscription replay responses");
     } else {
-        eprintln!("⚠ Received {} unexpected replays: {:?}", unexpected.len(), unexpected);
+        eprintln!(
+            "⚠ Received {} unexpected replays: {:?}",
+            unexpected.len(),
+            unexpected
+        );
     }
 }
 
@@ -1571,7 +1571,7 @@ async fn metrics_show_primary_connected(world: &mut IntegrationWorld) {
 }
 
 #[when(regex = r"^I wait (\d+) seconds for failover to backup$")]
-async fn wait_for_failover_to_backup(world: &mut IntegrationWorld, seconds: u64) {
+async fn wait_for_failover_to_backup(_world: &mut IntegrationWorld, seconds: u64) {
     eprintln!("⏱  Waiting {seconds}s for failover to backup...");
     tokio::time::sleep(Duration::from_secs(seconds)).await;
     eprintln!("✓ Wait complete");
