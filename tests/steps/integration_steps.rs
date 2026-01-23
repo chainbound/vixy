@@ -1322,7 +1322,15 @@ async fn wait_for_reconnection(_world: &mut IntegrationWorld, seconds: u64) {
 
 #[when("I send eth_blockNumber over WebSocket")]
 async fn send_eth_block_number_ws(world: &mut IntegrationWorld) {
+    // Clear old response to ensure we're validating the new one
+    world.last_response_body = None;
+
     client_sends_eth_block_number(world).await;
+
+    // Wait briefly and receive the response
+    // This ensures subsequent Then steps validate the post-reconnect response, not stale pre-reconnect data
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    client_receives_response_within(world, 5).await;
 }
 
 #[then("I should NOT receive any subscription replay responses")]
@@ -1443,16 +1451,31 @@ async fn receive_confirmation_for_both(world: &mut IntegrationWorld) {
 }
 
 #[then("both subscriptions should still be active")]
-async fn both_subscriptions_active(_world: &mut IntegrationWorld) {
-    // This is a check that will be verified by receiving notifications
-    eprintln!("✓ Assuming both subscriptions active (will verify with notifications)");
+async fn both_subscriptions_active(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection is still up (minimum requirement for active subscriptions)
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should be active for subscriptions to work"
+    );
+
+    // Note: Full verification requires receiving actual subscription notifications,
+    // which needs block production. This test validates connection state only.
+    eprintln!(
+        "✓ WebSocket connection active (full subscription validation requires block production)"
+    );
 }
 
 #[then("I should receive notifications for both subscription types")]
-async fn receive_notifications_for_both(_world: &mut IntegrationWorld) {
-    // In a real test, we'd wait for actual notifications
-    // For now, we assume they're working if subscriptions were confirmed
-    eprintln!("✓ Subscription notifications assumed working (full test requires block production)");
+async fn receive_notifications_for_both(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection is active (prerequisite for notifications)
+    assert!(
+        world.ws_connected,
+        "WebSocket must be connected to receive notifications"
+    );
+
+    // Note: Actually receiving and validating notifications requires block production
+    // in the test environment. This test validates prerequisites only.
+    eprintln!("✓ WebSocket active (actual notification validation requires block production)");
 }
 
 #[when(regex = r"^I send eth_blockNumber with RPC ID (\d+)$")]
@@ -1672,7 +1695,16 @@ async fn websocket_should_still_work(world: &mut IntegrationWorld) {
 }
 
 #[then("I should receive notifications without interruption")]
-async fn receive_notifications_without_interruption(_world: &mut IntegrationWorld) {
-    // This would require actual block production in the test
-    eprintln!("✓ Assuming continuous notifications (requires block production to verify)");
+async fn receive_notifications_without_interruption(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection remained active (prerequisite for uninterrupted notifications)
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should remain active for uninterrupted notifications"
+    );
+
+    // Note: Actually receiving and validating continuous notifications requires block production
+    // and time-series analysis. This test validates connection stability only.
+    eprintln!(
+        "✓ WebSocket connection stable (full notification continuity validation requires block production)"
+    );
 }
