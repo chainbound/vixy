@@ -21,6 +21,10 @@ max_retries = 2
 # This prevents transient failures from immediately marking a node as unhealthy
 health_check_max_failures = 3
 
+# Maximum request body size in bytes (default: unlimited)
+# Uncomment to limit request body size, e.g. 10 MB:
+# max_body_size = 10485760
+
 [metrics]
 # Enable or disable Prometheus metrics
 enabled = true
