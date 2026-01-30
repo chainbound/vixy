@@ -9,7 +9,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
@@ -43,6 +43,29 @@ type ClientSender = futures_util::stream::SplitSink<WebSocket, Message>;
 /// - is_replay: true if this is a replayed subscription during reconnection (response should not be forwarded to client)
 /// - original_client_sub_id: for replayed subscriptions, the original client-facing subscription ID to preserve
 type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>, bool, Option<String>)>;
+
+// ============================================================================
+// Reconnection Message Queue
+// ============================================================================
+
+/// Maximum number of messages to buffer during WebSocket reconnection
+const MAX_RECONNECT_QUEUE_SIZE: usize = 1000;
+
+/// Combines the reconnecting flag and message queue under a single Mutex
+/// to prevent FIFO ordering races between checking the flag and accessing the queue.
+struct ReconnectQueue {
+    is_reconnecting: bool,
+    queue: VecDeque<Message>,
+}
+
+impl ReconnectQueue {
+    fn new() -> Self {
+        Self {
+            is_reconnecting: false,
+            queue: VecDeque::new(),
+        }
+    }
+}
 
 // ============================================================================
 // Subscription Tracking for Reconnection
@@ -89,8 +112,10 @@ impl SubscriptionTracker {
     }
 
     /// Map a new upstream subscription ID to an existing client-facing ID
-    /// Called after replaying subscriptions on a new upstream connection
+    /// Called after replaying subscriptions on a new upstream connection.
+    /// Removes any previous upstream mapping for the same client ID to prevent leaks.
     pub fn map_upstream_id(&mut self, upstream_id: &str, client_id: &str) {
+        self.upstream_to_client_id.retain(|_, v| v != client_id);
         self.upstream_to_client_id
             .insert(upstream_id.to_string(), client_id.to_string());
     }
@@ -268,7 +293,7 @@ async fn handle_websocket(
     // Spawn health monitor
     let health_state = state.clone();
     let health_node_name = current_node_name.clone();
-    let _health_monitor = tokio::spawn(async move {
+    let health_monitor_handle = tokio::spawn(async move {
         health_monitor(health_state, health_node_name, reconnect_tx).await;
     });
 
@@ -281,6 +306,9 @@ async fn handle_websocket(
         reconnect_rx,
     )
     .await;
+
+    // Abort health monitor to prevent lingering tasks after disconnect
+    health_monitor_handle.abort();
 
     // Update metrics on disconnect
     let final_node = current_node_name.lock().await.clone();
@@ -336,9 +364,10 @@ async fn run_proxy_loop(
     // Track pending subscribe requests: rpc_id -> (params, response_tx)
     let pending_subscribes: Arc<Mutex<PendingSubscribes>> = Arc::new(Mutex::new(HashMap::new()));
 
-    // Queue for buffering messages during reconnection to prevent message loss
-    let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
-    let is_reconnecting: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    // Queue for buffering messages during reconnection to prevent message loss.
+    // The reconnecting flag is stored alongside the queue under the same Mutex
+    // to avoid a race where a message could bypass the queue between flag clear and drain.
+    let reconnect_queue: Arc<Mutex<ReconnectQueue>> = Arc::new(Mutex::new(ReconnectQueue::new()));
 
     // Track reconnection completion across loop iterations (reconnection runs in background)
     // Result includes the old node name for metric cleanup and rollback on failure
@@ -354,8 +383,7 @@ async fn run_proxy_loop(
                     &upstream_sender,
                     &tracker,
                     &pending_subscribes,
-                    &message_queue,
-                    &is_reconnecting,
+                    &reconnect_queue,
                 ).await
                     && should_close
                 {
@@ -401,7 +429,7 @@ async fn run_proxy_loop(
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
                 // Set flag to queue incoming messages during reconnection
-                is_reconnecting.store(true, Ordering::SeqCst);
+                reconnect_queue.lock().await.is_reconnecting = true;
 
                 // Spawn reconnection as background task so main loop can continue processing client messages
                 // Messages sent during reconnection will be queued and replayed after completion
@@ -441,15 +469,16 @@ async fn run_proxy_loop(
                         upstream_msg_rx = new_upstream_rx;
                         tokio::spawn(upstream_receiver_task(new_receiver, new_upstream_tx));
 
-                        // Replay messages that were queued during reconnection
-                        is_reconnecting.store(false, Ordering::SeqCst);
-                        let mut queue = message_queue.lock().await;
-                        let queued_count = queue.len();
-                        if queued_count > 0 {
-                            info!(count = queued_count, "Replaying queued messages after reconnection");
+                        // Drain queue and clear flag atomically, then replay outside lock
+                        let queued_messages: Vec<Message> = {
+                            let mut rq = reconnect_queue.lock().await;
+                            rq.is_reconnecting = false;
+                            rq.queue.drain(..).collect()
+                        };
+                        if !queued_messages.is_empty() {
+                            info!(count = queued_messages.len(), "Replaying queued messages after reconnection");
                         }
-                        while let Some(queued_msg) = queue.pop_front() {
-                            // Replay each queued message in FIFO order
+                        for queued_msg in queued_messages {
                             if let Err(should_close) = handle_client_message_internal(
                                 queued_msg,
                                 &upstream_sender,
@@ -479,13 +508,14 @@ async fn run_proxy_loop(
                         *current_node_name.lock().await = old_node;
 
                         // Clear flag and drop queued messages on reconnection failure
-                        // Prevents stale messages from being replayed on next successful reconnect
-                        is_reconnecting.store(false, Ordering::SeqCst);
-                        let mut queue = message_queue.lock().await;
-                        let dropped_count = queue.len();
-                        queue.clear();
-                        if dropped_count > 0 {
-                            warn!(count = dropped_count, "Dropped queued messages due to reconnection failure");
+                        {
+                            let mut rq = reconnect_queue.lock().await;
+                            rq.is_reconnecting = false;
+                            let dropped_count = rq.queue.len();
+                            rq.queue.clear();
+                            if dropped_count > 0 {
+                                warn!(count = dropped_count, "Dropped queued messages due to reconnection failure");
+                            }
                         }
 
                         error!(error = %e, "Failed to reconnect WebSocket upstream");
@@ -661,15 +691,20 @@ async fn handle_client_message(
     upstream_sender: &Arc<Mutex<UpstreamSender>>,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
     pending_subscribes: &Arc<Mutex<PendingSubscribes>>,
-    message_queue: &Arc<Mutex<VecDeque<Message>>>,
-    is_reconnecting: &Arc<AtomicBool>,
+    reconnect_queue: &Arc<Mutex<ReconnectQueue>>,
 ) -> Result<(), bool> {
-    // Check if we're currently reconnecting
-    if is_reconnecting.load(Ordering::SeqCst) {
-        // Queue the message for replay after reconnection
-        debug!("Queueing message during reconnection");
-        message_queue.lock().await.push_back(msg);
-        return Ok(());
+    // Check if we're currently reconnecting (flag and queue under same lock)
+    {
+        let mut rq = reconnect_queue.lock().await;
+        if rq.is_reconnecting {
+            if rq.queue.len() >= MAX_RECONNECT_QUEUE_SIZE {
+                warn!("Reconnect message queue full, dropping message");
+                return Ok(());
+            }
+            debug!("Queueing message during reconnection");
+            rq.queue.push_back(msg);
+            return Ok(());
+        }
     }
 
     // Not reconnecting, process normally
@@ -907,6 +942,8 @@ mod tests {
             proxy_timeout_ms: 30000,
             max_retries: 2,
             health_check_max_failures: 3,
+            max_body_size: usize::MAX,
+            http_client: reqwest::Client::new(),
         })
     }
 
@@ -1119,7 +1156,7 @@ mod tests {
         // Verify it's tracked
         assert!(pending.contains_key("100"));
         assert_eq!(pending.get("100").unwrap().0, params);
-        assert_eq!(pending.get("100").unwrap().2, false); // is_replay = false
+        assert!(!pending.get("100").unwrap().2); // is_replay = false
 
         // Remove it when response received
         let removed = pending.remove("100");
@@ -1150,11 +1187,7 @@ mod tests {
 
         // Verify it's marked as a replay
         assert!(pending.contains_key("100"));
-        assert_eq!(
-            pending.get("100").unwrap().2,
-            true,
-            "Should be marked as replay"
-        );
+        assert!(pending.get("100").unwrap().2, "Should be marked as replay");
     }
 
     // =========================================================================
@@ -1163,85 +1196,69 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_queued_when_reconnecting() {
-        // Create test data
-        let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
-        let is_reconnecting = Arc::new(AtomicBool::new(true)); // Reconnecting!
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
+        rq.lock().await.is_reconnecting = true;
 
-        // Create dummy dependencies (won't be used since message will be queued)
-        // We can't easily create a real WebSocket in tests, but we can test the queueing logic
-        // by directly calling the wrapper function and checking the queue
-
-        // Create a text message to queue
         let test_msg = Message::Text("test message".to_string().into());
 
         // Simulate what handle_client_message does when reconnecting
-        if is_reconnecting.load(Ordering::SeqCst) {
-            message_queue.lock().await.push_back(test_msg);
+        {
+            let mut guard = rq.lock().await;
+            if guard.is_reconnecting {
+                guard.queue.push_back(test_msg);
+            }
         }
 
-        // Verify message was queued
-        let queue = message_queue.lock().await;
-        assert_eq!(queue.len(), 1, "Message should be in queue");
+        assert_eq!(rq.lock().await.queue.len(), 1, "Message should be in queue");
     }
 
     #[tokio::test]
     async fn test_message_not_queued_when_not_reconnecting() {
-        // Create test data
-        let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
-        let _is_reconnecting = Arc::new(AtomicBool::new(false)); // Not reconnecting
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
+        // is_reconnecting defaults to false
 
-        // This test is harder to fully test without a real upstream connection
-        // The behavior is tested in integration tests
-        // This test just verifies the flag is checked correctly
-
-        // Verify queue is empty initially
-        let queue = message_queue.lock().await;
         assert_eq!(
-            queue.len(),
+            rq.lock().await.queue.len(),
             0,
             "Queue should be empty when not reconnecting"
         );
     }
 
-    #[test]
-    fn test_reconnecting_flag_toggling() {
-        // Test that the atomic bool works correctly
-        let is_reconnecting = Arc::new(AtomicBool::new(false));
+    #[tokio::test]
+    async fn test_reconnecting_flag_toggling() {
+        let rq = ReconnectQueue::new();
+        assert!(!rq.is_reconnecting, "Should start as false");
 
-        assert!(
-            !is_reconnecting.load(Ordering::SeqCst),
-            "Should start as false"
-        );
+        let mut rq = rq;
+        rq.is_reconnecting = true;
+        assert!(rq.is_reconnecting, "Should be true after set");
 
-        is_reconnecting.store(true, Ordering::SeqCst);
-        assert!(
-            is_reconnecting.load(Ordering::SeqCst),
-            "Should be true after store"
-        );
-
-        is_reconnecting.store(false, Ordering::SeqCst);
-        assert!(
-            !is_reconnecting.load(Ordering::SeqCst),
-            "Should be false after store"
-        );
+        rq.is_reconnecting = false;
+        assert!(!rq.is_reconnecting, "Should be false after clear");
     }
 
     #[tokio::test]
     async fn test_message_queue_fifo_ordering() {
-        // Test that messages are queued and dequeued in FIFO order
-        let message_queue: Arc<Mutex<VecDeque<Message>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
 
         // Queue multiple messages
         {
-            let mut queue = message_queue.lock().await;
-            queue.push_back(Message::Text("first".to_string().into()));
-            queue.push_back(Message::Text("second".to_string().into()));
-            queue.push_back(Message::Text("third".to_string().into()));
+            let mut guard = rq.lock().await;
+            guard
+                .queue
+                .push_back(Message::Text("first".to_string().into()));
+            guard
+                .queue
+                .push_back(Message::Text("second".to_string().into()));
+            guard
+                .queue
+                .push_back(Message::Text("third".to_string().into()));
         }
 
         // Verify FIFO ordering
         {
-            let mut queue = message_queue.lock().await;
+            let mut guard = rq.lock().await;
+            let queue = &mut guard.queue;
 
             if let Some(Message::Text(msg)) = queue.pop_front() {
                 assert_eq!(
