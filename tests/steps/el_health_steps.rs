@@ -19,6 +19,7 @@ fn make_el_node(name: &str, block_number: u64, check_ok: bool) -> ElNodeState {
         check_ok,
         is_healthy: false,
         lag: 0,
+        consecutive_failures: 0,
     }
 }
 

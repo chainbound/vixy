@@ -99,7 +99,12 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     let mut healthy_count = 0u64;
 
     for node in el_nodes.iter_mut() {
-        el::calculate_el_health(node, chain_head, state.max_el_lag);
+        el::calculate_el_health(
+            node,
+            chain_head,
+            state.max_el_lag,
+            state.health_check_max_failures,
+        );
 
         if node.is_primary && node.is_healthy {
             any_primary_healthy = true;
@@ -121,6 +126,7 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
             block_number = node.block_number,
             check_ok = node.check_ok,
             lag = node.lag,
+            consecutive_failures = node.consecutive_failures,
             is_healthy = node.is_healthy,
             "EL node health calculated"
         );
@@ -201,7 +207,12 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
         let mut healthy_count = 0u64;
 
         for node in cl_nodes.iter_mut() {
-            cl::calculate_cl_health(node, chain_head, state.max_cl_lag);
+            cl::calculate_cl_health(
+                node,
+                chain_head,
+                state.max_cl_lag,
+                state.health_check_max_failures,
+            );
 
             if node.is_healthy {
                 healthy_count += 1;
@@ -217,6 +228,7 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
                 slot = node.slot,
                 health_ok = node.health_ok,
                 lag = node.lag,
+                consecutive_failures = node.consecutive_failures,
                 is_healthy = node.is_healthy,
                 "CL node health calculated"
             );

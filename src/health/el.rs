@@ -89,12 +89,32 @@ pub fn update_el_chain_head(nodes: &[ElNodeState]) -> u64 {
 }
 
 /// Calculate health status for an EL node based on chain head and max lag
-pub fn calculate_el_health(node: &mut ElNodeState, chain_head: u64, max_lag: u64) {
+pub fn calculate_el_health(
+    node: &mut ElNodeState,
+    chain_head: u64,
+    max_lag: u64,
+    max_failures: u32,
+) {
     // Calculate lag (how far behind the node is from chain head)
     node.lag = chain_head.saturating_sub(node.block_number);
 
-    // Node is healthy if check succeeded AND lag is within the allowed threshold
-    node.is_healthy = node.check_ok && node.lag <= max_lag;
+    // Determine if this check passed (check succeeded AND lag is within threshold)
+    let check_passed = node.check_ok && node.lag <= max_lag;
+
+    if check_passed {
+        // Reset consecutive failures on success
+        node.consecutive_failures = 0;
+        node.is_healthy = true;
+    } else {
+        // Increment consecutive failures
+        node.consecutive_failures += 1;
+
+        // Only mark as unhealthy if we've exceeded the threshold
+        if node.consecutive_failures >= max_failures {
+            node.is_healthy = false;
+        }
+        // Otherwise, keep the current health status (might still be healthy from before)
+    }
 }
 
 #[cfg(test)]
@@ -215,6 +235,7 @@ mod tests {
             check_ok,
             is_healthy: false,
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 
@@ -223,7 +244,7 @@ mod tests {
         let mut node = make_el_node("test", 1000, true);
         let chain_head = 1005;
 
-        calculate_el_health(&mut node, chain_head, 10);
+        calculate_el_health(&mut node, chain_head, 10, 3);
 
         assert_eq!(node.lag, 5, "Lag should be chain_head - block_number");
     }
@@ -234,7 +255,7 @@ mod tests {
         let chain_head = 1002;
         let max_lag = 5;
 
-        calculate_el_health(&mut node, chain_head, max_lag);
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
 
         assert!(
             node.is_healthy,
@@ -246,14 +267,32 @@ mod tests {
     #[test]
     fn test_el_node_unhealthy_exceeds_lag() {
         let mut node = make_el_node("test", 990, true);
+        node.is_healthy = true; // Start as healthy
         let chain_head = 1000;
         let max_lag = 5;
 
-        calculate_el_health(&mut node, chain_head, max_lag);
+        // First failure - still healthy (threshold is 3)
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
 
+        // Second failure - still healthy
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Third failure - now unhealthy
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 3);
         assert!(
             !node.is_healthy,
-            "Node should be unhealthy when lag > max_lag"
+            "Node should be unhealthy after 3 failures"
         );
         assert_eq!(node.lag, 10);
     }
@@ -264,7 +303,7 @@ mod tests {
         let chain_head = 1000;
         let max_lag = 5;
 
-        calculate_el_health(&mut node, chain_head, max_lag);
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
 
         assert!(
             node.is_healthy,
@@ -276,16 +315,67 @@ mod tests {
     #[test]
     fn test_el_node_unhealthy_when_check_fails() {
         let mut node = make_el_node("test", 1000, false); // check_ok = false
+        node.is_healthy = true; // Start as healthy
         let chain_head = 1000;
         let max_lag = 5;
 
-        calculate_el_health(&mut node, chain_head, max_lag);
+        // First failure
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
 
+        // Second failure
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Third failure
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 3);
         assert!(
             !node.is_healthy,
-            "Node should be unhealthy when check_ok is false"
+            "Node should be unhealthy after 3 failures"
         );
         assert_eq!(node.lag, 0);
+    }
+
+    #[test]
+    fn test_el_node_consecutive_failures_reset_on_recovery() {
+        let mut node = make_el_node("test", 990, true);
+        node.is_healthy = true; // Start as healthy
+        let chain_head = 1000;
+        let max_lag = 5;
+
+        // First failure - still healthy
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 1);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 1 failure"
+        );
+
+        // Second failure - still healthy
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(node.consecutive_failures, 2);
+        assert!(
+            node.is_healthy,
+            "Node should still be healthy after 2 failures"
+        );
+
+        // Recovery - node catches up
+        node.block_number = 1000;
+        calculate_el_health(&mut node, chain_head, max_lag, 3);
+        assert_eq!(
+            node.consecutive_failures, 0,
+            "Consecutive failures should reset on success"
+        );
+        assert!(node.is_healthy, "Node should be healthy after recovery");
     }
 
     // =========================================================================

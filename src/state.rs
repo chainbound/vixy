@@ -26,6 +26,8 @@ pub struct ElNodeState {
     pub is_healthy: bool,
     /// Current lag from chain head (in blocks)
     pub lag: u64,
+    /// Number of consecutive health check failures
+    pub consecutive_failures: u32,
 }
 
 impl ElNodeState {
@@ -40,6 +42,7 @@ impl ElNodeState {
             check_ok: false,   // Start with check not ok
             is_healthy: false, // Start unhealthy until health check passes
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 }
@@ -59,6 +62,8 @@ pub struct ClNodeState {
     pub is_healthy: bool,
     /// Current lag from chain head (in slots)
     pub lag: u64,
+    /// Number of consecutive health check failures
+    pub consecutive_failures: u32,
 }
 
 impl ClNodeState {
@@ -71,6 +76,7 @@ impl ClNodeState {
             health_ok: false,  // Start with health not ok
             is_healthy: false, // Start unhealthy until health check passes
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 }
@@ -96,6 +102,8 @@ pub struct AppState {
     pub proxy_timeout_ms: u64,
     /// Maximum number of retry attempts
     pub max_retries: u32,
+    /// Number of consecutive health check failures before marking node as unhealthy
+    pub health_check_max_failures: u32,
 }
 
 impl AppState {
@@ -127,6 +135,7 @@ impl AppState {
             max_cl_lag: config.global.max_cl_lag_slots,
             proxy_timeout_ms: config.global.proxy_timeout_ms,
             max_retries: config.global.max_retries,
+            health_check_max_failures: config.global.health_check_max_failures,
         }
     }
 }

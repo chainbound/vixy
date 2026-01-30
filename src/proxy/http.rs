@@ -377,6 +377,7 @@ mod tests {
             max_cl_lag: 3,
             proxy_timeout_ms: 30000,
             max_retries: 2,
+            health_check_max_failures: 3,
         })
     }
 
@@ -390,6 +391,7 @@ mod tests {
             check_ok: is_healthy,
             is_healthy,
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 
@@ -401,6 +403,7 @@ mod tests {
             health_ok: is_healthy,
             is_healthy,
             lag: 0,
+            consecutive_failures: 0,
         }
     }
 
