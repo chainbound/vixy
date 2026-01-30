@@ -554,13 +554,18 @@ async fn handle_client_message_internal(
 ) -> Result<(), bool> {
     match msg {
         Message::Text(text) => {
-            debug!(direction = "client->upstream", "Forwarding text message");
             VixyMetrics::inc_ws_messages("upstream");
 
             // Check if this is an eth_subscribe or eth_unsubscribe request
             if let Ok(json) = serde_json::from_str::<Value>(text.as_str()) {
                 let method = json.get("method").and_then(|m| m.as_str());
                 let rpc_id = json.get("id").cloned();
+
+                if let Some(m) = method {
+                    debug!(method = m, direction = "client->upstream", "WS request");
+                } else {
+                    debug!(direction = "client->upstream", "WS request (unknown method)");
+                }
 
                 if method == Some("eth_subscribe") {
                     // Track pending subscribe request (normal client subscription, not a replay)
@@ -581,6 +586,8 @@ async fn handle_client_message_internal(
                         VixyMetrics::dec_ws_subscriptions();
                     }
                 }
+            } else {
+                debug!(direction = "client->upstream", "WS request (non-JSON)");
             }
 
             // Forward to upstream

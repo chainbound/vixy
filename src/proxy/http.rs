@@ -1,11 +1,12 @@
 //! HTTP proxy handlers for EL and CL requests
 
 use axum::Json;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use serde_json::Value;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -49,10 +50,43 @@ pub async fn el_proxy_handler(
         }
     };
 
-    debug!(target_url, node_name, tier, "Proxying EL request");
+    // Read the body so we can log the JSON-RPC method
+    let http_method = request.method().clone();
+    let headers = request.headers().clone();
+    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!(error = %e, "Failed to read request body");
+            return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response();
+        }
+    };
+
+    // Log JSON-RPC method(s) from request body
+    if let Ok(json) = serde_json::from_slice::<Value>(&body_bytes) {
+        if let Some(arr) = json.as_array() {
+            // Batch request
+            let methods: Vec<&str> = arr
+                .iter()
+                .filter_map(|v| v.get("method").and_then(|m| m.as_str()))
+                .collect();
+            debug!(
+                node = node_name,
+                tier,
+                count = arr.len(),
+                methods = ?methods,
+                "EL batch request"
+            );
+        } else if let Some(method) = json.get("method").and_then(|m| m.as_str()) {
+            debug!(method, node = node_name, tier, "EL request");
+        } else {
+            debug!(node = node_name, tier, "EL request (unknown method)");
+        }
+    } else {
+        debug!(node = node_name, tier, "EL request (non-JSON body)");
+    }
 
     // Forward the request
-    let response = forward_request(request, &target_url).await;
+    let response = forward_request(http_method, headers, body_bytes, &target_url).await;
 
     // Record metrics
     let duration = start.elapsed().as_secs_f64();
@@ -118,10 +152,21 @@ pub async fn cl_proxy_handler(
         format!("{base_url}/{cl_path}{query}")
     };
 
+    // Read body for forwarding
+    let http_method = request.method().clone();
+    let headers = request.headers().clone();
+    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            warn!(error = %e, "Failed to read request body");
+            return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response();
+        }
+    };
+
     debug!(full_url, node_name, "Proxying CL request");
 
     // Forward the request to the constructed URL
-    let response = forward_request_to_url(request, &full_url).await;
+    let response = forward_request_to_url(http_method, headers, body_bytes, &full_url).await;
 
     // Record metrics
     let duration = start.elapsed().as_secs_f64();
@@ -132,23 +177,16 @@ pub async fn cl_proxy_handler(
 }
 
 /// Forward a request to a target URL
-async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
+async fn forward_request(
+    method: axum::http::Method,
+    headers: HeaderMap,
+    body_bytes: Bytes,
+    target_url: &str,
+) -> Response {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS))
         .build()
         .expect("Failed to build HTTP client");
-
-    // Extract method and headers
-    let method = request.method().clone();
-    let headers = request.headers().clone();
-
-    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            warn!(error = %e, "Failed to read request body");
-            return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response();
-        }
-    };
 
     // Build the forwarded request with all headers except hop-by-hop headers
     let mut forward_request = client.request(method, target_url);
@@ -191,23 +229,16 @@ async fn forward_request(request: Request<Body>, target_url: &str) -> Response {
 }
 
 /// Forward a request to a specific URL (used for CL with path construction)
-async fn forward_request_to_url(request: Request<Body>, target_url: &str) -> Response {
+async fn forward_request_to_url(
+    method: axum::http::Method,
+    headers: HeaderMap,
+    body_bytes: Bytes,
+    target_url: &str,
+) -> Response {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(DEFAULT_TIMEOUT_MS))
         .build()
         .expect("Failed to build HTTP client");
-
-    // Extract method and headers
-    let method = request.method().clone();
-    let headers = request.headers().clone();
-
-    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            warn!(error = %e, "Failed to read request body");
-            return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response();
-        }
-    };
 
     // Build the forwarded request with all headers except hop-by-hop headers
     let mut forward_request = client.request(method, target_url);
