@@ -82,7 +82,6 @@ impl ClNodeState {
 }
 
 /// Main application state shared across all handlers
-#[derive(Debug)]
 pub struct AppState {
     /// EL node states (both primary and backup)
     pub el_nodes: Arc<RwLock<Vec<ElNodeState>>>,
@@ -104,6 +103,10 @@ pub struct AppState {
     pub max_retries: u32,
     /// Number of consecutive health check failures before marking node as unhealthy
     pub health_check_max_failures: u32,
+    /// Maximum request body size in bytes
+    pub max_body_size: usize,
+    /// Shared HTTP client for proxy requests (reuses connections)
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
@@ -125,6 +128,13 @@ impl AppState {
         // Create CL node states
         let cl_nodes: Vec<ClNodeState> = config.cl.iter().map(ClNodeState::from_config).collect();
 
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(
+                config.global.proxy_timeout_ms,
+            ))
+            .build()
+            .expect("Failed to build HTTP client");
+
         Self {
             el_nodes: Arc::new(RwLock::new(el_nodes)),
             cl_nodes: Arc::new(RwLock::new(cl_nodes)),
@@ -136,6 +146,8 @@ impl AppState {
             proxy_timeout_ms: config.global.proxy_timeout_ms,
             max_retries: config.global.max_retries,
             health_check_max_failures: config.global.health_check_max_failures,
+            max_body_size: config.global.max_body_size,
+            http_client,
         }
     }
 }

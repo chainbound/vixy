@@ -7,11 +7,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use tracing::{debug, error, info, warn};
 
@@ -37,7 +37,35 @@ type UpstreamReceiver = futures_util::stream::SplitStream<UpstreamWsStream>;
 type ClientSender = futures_util::stream::SplitSink<WebSocket, Message>;
 
 /// Type alias for pending subscribe requests map
-type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>)>;
+/// Tuple: (params, response_sender, is_replay, original_client_sub_id)
+/// - params: subscription parameters
+/// - response_sender: optional channel to send response back
+/// - is_replay: true if this is a replayed subscription during reconnection (response should not be forwarded to client)
+/// - original_client_sub_id: for replayed subscriptions, the original client-facing subscription ID to preserve
+type PendingSubscribes = HashMap<String, (Vec<Value>, Option<String>, bool, Option<String>)>;
+
+// ============================================================================
+// Reconnection Message Queue
+// ============================================================================
+
+/// Maximum number of messages to buffer during WebSocket reconnection
+const MAX_RECONNECT_QUEUE_SIZE: usize = 1000;
+
+/// Combines the reconnecting flag and message queue under a single Mutex
+/// to prevent FIFO ordering races between checking the flag and accessing the queue.
+struct ReconnectQueue {
+    is_reconnecting: bool,
+    queue: VecDeque<Message>,
+}
+
+impl ReconnectQueue {
+    fn new() -> Self {
+        Self {
+            is_reconnecting: false,
+            queue: VecDeque::new(),
+        }
+    }
+}
 
 // ============================================================================
 // Subscription Tracking for Reconnection
@@ -84,8 +112,10 @@ impl SubscriptionTracker {
     }
 
     /// Map a new upstream subscription ID to an existing client-facing ID
-    /// Called after replaying subscriptions on a new upstream connection
+    /// Called after replaying subscriptions on a new upstream connection.
+    /// Removes any previous upstream mapping for the same client ID to prevent leaks.
     pub fn map_upstream_id(&mut self, upstream_id: &str, client_id: &str) {
+        self.upstream_to_client_id.retain(|_, v| v != client_id);
         self.upstream_to_client_id
             .insert(upstream_id.to_string(), client_id.to_string());
     }
@@ -161,36 +191,45 @@ async fn health_monitor(
         interval.tick().await;
 
         let node_name = current_node_name.lock().await.clone();
+        let current_healthy = is_node_healthy(&state, &node_name).await;
 
-        // Check if current node is still healthy
-        if !is_node_healthy(&state, &node_name).await {
-            warn!(node = %node_name, "Current WebSocket upstream node is unhealthy");
+        // Check if a better node is available (prioritizes primary over backup)
+        if let Some((best_name, best_url)) = select_healthy_node(&state).await {
+            // Reconnect if better node available (different name)
+            // This handles both:
+            // 1. Current node unhealthy → switch to healthy node
+            // 2. Better node available (e.g., primary when on backup) → switch back
+            let should_reconnect = best_name != node_name;
 
-            // Try to find a new healthy node
-            if let Some((new_name, new_url)) = select_healthy_node(&state).await {
-                if new_name != node_name {
-                    info!(
-                        old_node = %node_name,
-                        new_node = %new_name,
-                        "Switching WebSocket to healthy node"
-                    );
+            if should_reconnect {
+                let reason = if !current_healthy {
+                    "current_unhealthy"
+                } else {
+                    "better_available"
+                };
 
-                    // Signal reconnection
-                    if reconnect_tx
-                        .send(ReconnectInfo {
-                            node_name: new_name,
-                            ws_url: new_url,
-                        })
-                        .await
-                        .is_err()
-                    {
-                        // Channel closed, connection is shutting down
-                        break;
-                    }
+                info!(
+                    current_node = %node_name,
+                    best_node = %best_name,
+                    reason = %reason,
+                    "Switching WebSocket upstream"
+                );
+
+                // Signal reconnection
+                if reconnect_tx
+                    .send(ReconnectInfo {
+                        node_name: best_name,
+                        ws_url: best_url,
+                    })
+                    .await
+                    .is_err()
+                {
+                    // Channel closed, connection is shutting down
+                    break;
                 }
-            } else {
-                warn!("No healthy EL nodes available for WebSocket reconnection");
             }
+        } else if !current_healthy {
+            warn!("Current WebSocket node unhealthy but no healthy nodes available");
         }
     }
 }
@@ -254,7 +293,7 @@ async fn handle_websocket(
     // Spawn health monitor
     let health_state = state.clone();
     let health_node_name = current_node_name.clone();
-    let _health_monitor = tokio::spawn(async move {
+    let health_monitor_handle = tokio::spawn(async move {
         health_monitor(health_state, health_node_name, reconnect_tx).await;
     });
 
@@ -267,6 +306,9 @@ async fn handle_websocket(
         reconnect_rx,
     )
     .await;
+
+    // Abort health monitor to prevent lingering tasks after disconnect
+    health_monitor_handle.abort();
 
     // Update metrics on disconnect
     let final_node = current_node_name.lock().await.clone();
@@ -322,6 +364,16 @@ async fn run_proxy_loop(
     // Track pending subscribe requests: rpc_id -> (params, response_tx)
     let pending_subscribes: Arc<Mutex<PendingSubscribes>> = Arc::new(Mutex::new(HashMap::new()));
 
+    // Queue for buffering messages during reconnection to prevent message loss.
+    // The reconnecting flag is stored alongside the queue under the same Mutex
+    // to avoid a race where a message could bypass the queue between flag clear and drain.
+    let reconnect_queue: Arc<Mutex<ReconnectQueue>> = Arc::new(Mutex::new(ReconnectQueue::new()));
+
+    // Track reconnection completion across loop iterations (reconnection runs in background)
+    // Result includes the old node name for metric cleanup and rollback on failure
+    type ReconnectResult = (Result<(UpstreamReceiver, UpstreamSender), String>, String);
+    let mut reconnect_result_rx: Option<oneshot::Receiver<ReconnectResult>> = None;
+
     loop {
         tokio::select! {
             // Handle messages from client
@@ -331,6 +383,7 @@ async fn run_proxy_loop(
                     &upstream_sender,
                     &tracker,
                     &pending_subscribes,
+                    &reconnect_queue,
                 ).await
                     && should_close
                 {
@@ -354,24 +407,59 @@ async fn run_proxy_loop(
 
             // Handle reconnection signal
             Some(reconnect_info) = reconnect_rx.recv() => {
+                // Check if a reconnection is already in progress
+                if reconnect_result_rx.is_some() {
+                    warn!(
+                        new_node = %reconnect_info.node_name,
+                        "Ignoring reconnection request - reconnection already in progress"
+                    );
+                    continue; // Skip this reconnection attempt
+                }
+
                 info!(
                     new_node = %reconnect_info.node_name,
                     new_url = %reconnect_info.ws_url,
                     "Reconnecting WebSocket to new upstream"
                 );
 
-                // Get old node name for metrics before updating
+                // Store old node name before changing (needed for rollback on failure)
                 let old_node = current_node_name.lock().await.clone();
 
-                // Update current node name
+                // Update current node name to target node
                 *current_node_name.lock().await = reconnect_info.node_name.clone();
 
-                // Attempt reconnection
-                match reconnect_upstream(
-                    &reconnect_info.ws_url,
-                    &tracker,
-                    &upstream_sender,
-                ).await {
+                // Set flag to queue incoming messages during reconnection
+                reconnect_queue.lock().await.is_reconnecting = true;
+
+                // Spawn reconnection as background task so main loop can continue processing client messages
+                // Messages sent during reconnection will be queued and replayed after completion
+                let (reconnect_tx, rx) = oneshot::channel();
+                reconnect_result_rx = Some(rx);  // Store receiver for next iteration
+
+                let ws_url = reconnect_info.ws_url.clone();
+                let tracker_clone = Arc::clone(&tracker);
+                let upstream_sender_clone = Arc::clone(&upstream_sender);
+                let pending_subscribes_clone = Arc::clone(&pending_subscribes);
+                let old_node_clone = old_node.clone();  // Clone for moving into spawn
+
+                tokio::spawn(async move {
+                    let result = reconnect_upstream(
+                        &ws_url,
+                        &tracker_clone,
+                        &upstream_sender_clone,
+                        &pending_subscribes_clone,
+                    ).await;
+                    // Include old_node in result for metric cleanup and rollback
+                    let _ = reconnect_tx.send((result, old_node_clone));
+                });
+
+                info!("Reconnection task spawned, main loop continues processing messages");
+            }
+
+            // Handle reconnection completion (success or failure)
+            Ok((result, old_node)) = async { reconnect_result_rx.as_mut().unwrap().await }, if reconnect_result_rx.is_some() => {
+                reconnect_result_rx = None;  // Clear receiver after receiving result
+                match result {
                     Ok((new_receiver, new_sender)) => {
                         // Replace upstream sender
                         *upstream_sender.lock().await = new_sender;
@@ -381,11 +469,33 @@ async fn run_proxy_loop(
                         upstream_msg_rx = new_upstream_rx;
                         tokio::spawn(upstream_receiver_task(new_receiver, new_upstream_tx));
 
+                        // Drain queue and clear flag atomically, then replay outside lock
+                        let queued_messages: Vec<Message> = {
+                            let mut rq = reconnect_queue.lock().await;
+                            rq.is_reconnecting = false;
+                            rq.queue.drain(..).collect()
+                        };
+                        if !queued_messages.is_empty() {
+                            info!(count = queued_messages.len(), "Replaying queued messages after reconnection");
+                        }
+                        for queued_msg in queued_messages {
+                            if let Err(should_close) = handle_client_message_internal(
+                                queued_msg,
+                                &upstream_sender,
+                                &tracker,
+                                &pending_subscribes,
+                            ).await && should_close {
+                                warn!("Failed to replay queued message, closing connection");
+                                break;
+                            }
+                        }
+
                         // Update metrics for successful reconnection
+                        // Clear old node metric before setting new node metric
+                        VixyMetrics::set_ws_upstream_node(&old_node, false);
                         VixyMetrics::inc_ws_reconnections();
                         VixyMetrics::inc_ws_reconnection_attempt("success");
-                        VixyMetrics::set_ws_upstream_node(&old_node, false);
-                        VixyMetrics::set_ws_upstream_node(&reconnect_info.node_name, true);
+                        VixyMetrics::set_ws_upstream_node(&current_node_name.lock().await, true);
 
                         info!("WebSocket reconnection successful");
                     }
@@ -393,8 +503,20 @@ async fn run_proxy_loop(
                         // Track failed reconnection attempt
                         VixyMetrics::inc_ws_reconnection_attempt("failed");
 
-                        // Revert node name since reconnection failed
+                        // Revert current_node_name to old node since reconnection failed
+                        // This ensures health monitor and metrics reflect actual connected node
                         *current_node_name.lock().await = old_node;
+
+                        // Clear flag and drop queued messages on reconnection failure
+                        {
+                            let mut rq = reconnect_queue.lock().await;
+                            rq.is_reconnecting = false;
+                            let dropped_count = rq.queue.len();
+                            rq.queue.clear();
+                            if dropped_count > 0 {
+                                warn!(count = dropped_count, "Dropped queued messages due to reconnection failure");
+                            }
+                        }
 
                         error!(error = %e, "Failed to reconnect WebSocket upstream");
                         // Continue with old connection (if still working)
@@ -452,9 +574,9 @@ async fn upstream_receiver_task(
     }
 }
 
-/// Handle a message from the client, forwarding to upstream
+/// Internal function that handles a message from the client, forwarding to upstream
 /// Returns Err(true) if connection should close, Err(false) for recoverable errors
-async fn handle_client_message(
+async fn handle_client_message_internal(
     msg: Message,
     upstream_sender: &Arc<Mutex<UpstreamSender>>,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
@@ -462,7 +584,6 @@ async fn handle_client_message(
 ) -> Result<(), bool> {
     match msg {
         Message::Text(text) => {
-            debug!(direction = "client->upstream", "Forwarding text message");
             VixyMetrics::inc_ws_messages("upstream");
 
             // Check if this is an eth_subscribe or eth_unsubscribe request
@@ -470,15 +591,24 @@ async fn handle_client_message(
                 let method = json.get("method").and_then(|m| m.as_str());
                 let rpc_id = json.get("id").cloned();
 
+                if let Some(m) = method {
+                    debug!(method = m, direction = "client->upstream", "WS request");
+                } else {
+                    debug!(
+                        direction = "client->upstream",
+                        "WS request (unknown method)"
+                    );
+                }
+
                 if method == Some("eth_subscribe") {
-                    // Track pending subscribe request
+                    // Track pending subscribe request (normal client subscription, not a replay)
                     if let (Some(id), Some(params)) = (rpc_id, json.get("params")) {
                         let id_str = id.to_string();
                         let params_vec = params.as_array().cloned().unwrap_or_default();
                         pending_subscribes
                             .lock()
                             .await
-                            .insert(id_str, (params_vec, None));
+                            .insert(id_str, (params_vec, None, false, None)); // Not a replay, no original ID
                     }
                 } else if method == Some("eth_unsubscribe") {
                     // Handle unsubscribe
@@ -489,6 +619,8 @@ async fn handle_client_message(
                         VixyMetrics::dec_ws_subscriptions();
                     }
                 }
+            } else {
+                debug!(direction = "client->upstream", "WS request (non-JSON)");
             }
 
             // Forward to upstream
@@ -548,6 +680,37 @@ async fn handle_client_message(
     Ok(())
 }
 
+/// Handle a message from the client, queuing if reconnecting or forwarding to upstream
+///
+/// During reconnection, messages are queued to prevent loss. After successful reconnection,
+/// queued messages are replayed in FIFO order.
+///
+/// Returns Err(true) if connection should close, Err(false) for recoverable errors
+async fn handle_client_message(
+    msg: Message,
+    upstream_sender: &Arc<Mutex<UpstreamSender>>,
+    tracker: &Arc<Mutex<SubscriptionTracker>>,
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>,
+    reconnect_queue: &Arc<Mutex<ReconnectQueue>>,
+) -> Result<(), bool> {
+    // Check if we're currently reconnecting (flag and queue under same lock)
+    {
+        let mut rq = reconnect_queue.lock().await;
+        if rq.is_reconnecting {
+            if rq.queue.len() >= MAX_RECONNECT_QUEUE_SIZE {
+                warn!("Reconnect message queue full, dropping message");
+                return Ok(());
+            }
+            debug!("Queueing message during reconnection");
+            rq.queue.push_back(msg);
+            return Ok(());
+        }
+    }
+
+    // Not reconnecting, process normally
+    handle_client_message_internal(msg, upstream_sender, tracker, pending_subscribes).await
+}
+
 /// Handle a message from upstream, forwarding to client with ID translation
 async fn handle_upstream_message(
     msg: TungsteniteMessage,
@@ -570,14 +733,35 @@ async fn handle_upstream_message(
                     if let Some(sub_id) = result.as_str() {
                         // This is a subscription response
                         let mut pending = pending_subscribes.lock().await;
-                        if let Some((params, _)) = pending.remove(&id_str) {
-                            // Track the subscription
-                            tracker
-                                .lock()
-                                .await
-                                .track_subscribe(params, id.clone(), sub_id);
-                            VixyMetrics::inc_ws_subscriptions();
-                            debug!(sub_id, "Tracked new subscription");
+                        if let Some((params, _, is_replay, original_client_sub_id)) =
+                            pending.remove(&id_str)
+                        {
+                            if is_replay {
+                                // This is a REPLAYED subscription response (from reconnection)
+                                // Map the new upstream subscription ID to the original client subscription ID
+                                if let Some(original_id) = original_client_sub_id {
+                                    tracker.lock().await.map_upstream_id(sub_id, &original_id);
+                                    debug!(
+                                        new_upstream_id = sub_id,
+                                        original_client_id = original_id,
+                                        "Mapped replayed subscription ID (not forwarding response)"
+                                    );
+                                } else {
+                                    error!("Replayed subscription missing original client ID");
+                                }
+                                // Note: Don't increment ws_subscriptions metric for replays
+                                // The subscription was already counted when originally created
+                                return Ok(());
+                            } else {
+                                // This is a NORMAL subscription response - track and forward to client
+                                tracker
+                                    .lock()
+                                    .await
+                                    .track_subscribe(params, id.clone(), sub_id);
+                                VixyMetrics::inc_ws_subscriptions();
+                                debug!(sub_id, "Tracked new subscription (forwarding response)");
+                                // Fall through to forward the response
+                            }
                         }
                     }
                 }
@@ -674,6 +858,7 @@ async fn reconnect_upstream(
     ws_url: &str,
     tracker: &Arc<Mutex<SubscriptionTracker>>,
     _old_sender: &Arc<Mutex<UpstreamSender>>,
+    pending_subscribes: &Arc<Mutex<PendingSubscribes>>, // ← ADD
 ) -> Result<(UpstreamReceiver, UpstreamSender), String> {
     // Connect to new upstream
     let (new_ws, _) = connect_async(ws_url)
@@ -703,6 +888,21 @@ async fn reconnect_upstream(
             "params": sub.params
         });
 
+        // Mark this as a replayed subscription
+        // The response will be consumed internally and not forwarded to client
+        // (client already received the original subscription response before reconnection)
+        // Include the original client subscription ID so we can map the new upstream ID to it
+        let id_str = sub.rpc_id.to_string();
+        pending_subscribes.lock().await.insert(
+            id_str,
+            (
+                sub.params.clone(),
+                None,
+                true,                            // is_replay = true
+                Some(sub.client_sub_id.clone()), // original client subscription ID
+            ),
+        );
+
         // Send subscribe request
         new_sender
             .send(TungsteniteMessage::Text(request.to_string().into()))
@@ -711,7 +911,8 @@ async fn reconnect_upstream(
 
         debug!(
             client_sub_id = %sub.client_sub_id,
-            "Replayed subscription request"
+            rpc_id = %sub.rpc_id,
+            "Replayed subscription request (added to pending)"
         );
     }
 
@@ -741,6 +942,8 @@ mod tests {
             proxy_timeout_ms: 30000,
             max_retries: 2,
             health_check_max_failures: 3,
+            max_body_size: usize::MAX,
+            http_client: reqwest::Client::new(),
         })
     }
 
@@ -935,5 +1138,159 @@ mod tests {
         assert_eq!(tracker.translate_to_client_id("0x1"), None);
         assert!(tracker.has_subscriptions());
         assert_eq!(tracker.get_all_subscriptions().len(), 1);
+    }
+
+    // =========================================================================
+    // Subscription replay behavior during reconnection
+    // =========================================================================
+
+    #[test]
+    fn test_pending_subscribes_tracking() {
+        // Test that PendingSubscribes correctly tracks subscription requests
+        let mut pending: PendingSubscribes = HashMap::new();
+
+        // Add a pending subscribe request (normal subscription, not replay)
+        let params = vec![serde_json::json!("newHeads")];
+        pending.insert("100".to_string(), (params.clone(), None, false, None));
+
+        // Verify it's tracked
+        assert!(pending.contains_key("100"));
+        assert_eq!(pending.get("100").unwrap().0, params);
+        assert!(!pending.get("100").unwrap().2); // is_replay = false
+
+        // Remove it when response received
+        let removed = pending.remove("100");
+        assert!(removed.is_some());
+        assert!(!pending.contains_key("100"));
+    }
+
+    #[test]
+    fn test_subscription_replay_should_add_to_pending() {
+        // This test documents the expected behavior:
+        // When reconnect_upstream replays a subscription, it should add the
+        // RPC ID to pending_subscribes so that the response is consumed internally
+        // and not forwarded to the client.
+
+        let _tracker = SubscriptionTracker::new();
+        let mut pending: PendingSubscribes = HashMap::new();
+
+        // Simulate a replayed subscription during reconnection
+        pending.insert(
+            "100".to_string(),
+            (
+                vec![serde_json::json!("newHeads")],
+                None,
+                true,
+                Some("original-id".to_string()),
+            ),
+        );
+
+        // Verify it's marked as a replay
+        assert!(pending.contains_key("100"));
+        assert!(pending.get("100").unwrap().2, "Should be marked as replay");
+    }
+
+    // =========================================================================
+    // Message queueing during reconnection
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_message_queued_when_reconnecting() {
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
+        rq.lock().await.is_reconnecting = true;
+
+        let test_msg = Message::Text("test message".to_string().into());
+
+        // Simulate what handle_client_message does when reconnecting
+        {
+            let mut guard = rq.lock().await;
+            if guard.is_reconnecting {
+                guard.queue.push_back(test_msg);
+            }
+        }
+
+        assert_eq!(rq.lock().await.queue.len(), 1, "Message should be in queue");
+    }
+
+    #[tokio::test]
+    async fn test_message_not_queued_when_not_reconnecting() {
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
+        // is_reconnecting defaults to false
+
+        assert_eq!(
+            rq.lock().await.queue.len(),
+            0,
+            "Queue should be empty when not reconnecting"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reconnecting_flag_toggling() {
+        let rq = ReconnectQueue::new();
+        assert!(!rq.is_reconnecting, "Should start as false");
+
+        let mut rq = rq;
+        rq.is_reconnecting = true;
+        assert!(rq.is_reconnecting, "Should be true after set");
+
+        rq.is_reconnecting = false;
+        assert!(!rq.is_reconnecting, "Should be false after clear");
+    }
+
+    #[tokio::test]
+    async fn test_message_queue_fifo_ordering() {
+        let rq = Arc::new(Mutex::new(ReconnectQueue::new()));
+
+        // Queue multiple messages
+        {
+            let mut guard = rq.lock().await;
+            guard
+                .queue
+                .push_back(Message::Text("first".to_string().into()));
+            guard
+                .queue
+                .push_back(Message::Text("second".to_string().into()));
+            guard
+                .queue
+                .push_back(Message::Text("third".to_string().into()));
+        }
+
+        // Verify FIFO ordering
+        {
+            let mut guard = rq.lock().await;
+            let queue = &mut guard.queue;
+
+            if let Some(Message::Text(msg)) = queue.pop_front() {
+                assert_eq!(
+                    msg.as_str(),
+                    "first",
+                    "First message should be dequeued first"
+                );
+            } else {
+                panic!("Expected text message");
+            }
+
+            if let Some(Message::Text(msg)) = queue.pop_front() {
+                assert_eq!(
+                    msg.as_str(),
+                    "second",
+                    "Second message should be dequeued second"
+                );
+            } else {
+                panic!("Expected text message");
+            }
+
+            if let Some(Message::Text(msg)) = queue.pop_front() {
+                assert_eq!(
+                    msg.as_str(),
+                    "third",
+                    "Third message should be dequeued third"
+                );
+            } else {
+                panic!("Expected text message");
+            }
+
+            assert_eq!(queue.len(), 0, "Queue should be empty after all dequeues");
+        }
     }
 }

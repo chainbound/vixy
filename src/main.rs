@@ -40,11 +40,11 @@ async fn main() -> eyre::Result<()> {
         .install_default()
         .map_err(|_| eyre::eyre!("Failed to install rustls crypto provider"))?;
 
-    // Initialize tracing
+    // Initialize tracing (RUST_LOG env var overrides the default INFO level)
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 

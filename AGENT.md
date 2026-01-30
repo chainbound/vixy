@@ -630,3 +630,66 @@ cargo test --test cucumber    # BDD tests
 cargo fmt --check             # Check formatting
 cargo clippy -- -D warnings   # Run lints
 ```
+
+---
+
+## File Organization for AI Sessions
+
+**Important**: When working on new features or fixes that generate significant documentation, organize files properly:
+
+### Session-Specific Files → `agent/<session-name>/`
+
+All documentation, analysis, and artifacts from an AI-assisted development session should go into a dedicated folder:
+
+```
+agent/
+  └── <session-name>/          # e.g., "websocket-reconnection-fix"
+      ├── README.md            # Session overview and summary
+      ├── <ANALYSIS>.md        # Root cause analysis, investigation
+      ├── <FIX-PLAN>.md        # Implementation plan
+      ├── <IMPROVEMENTS>.md    # Testing/design improvements
+      └── ...                  # Other session-specific docs
+```
+
+### Files That Stay in Root
+
+- **AGENT.md** (this file) - Core development guide
+- **DIARY.md** - Ongoing development diary (all sessions)
+- **README.md** - Project documentation
+- **BLOG.md** - Project blog posts and stories (general, not session-specific)
+- **INTEGRATION_TESTS.md** - Integration testing guide (general, not session-specific)
+- **Cargo.toml**, **Justfile**, etc. - Configuration files
+
+### Example Structure
+
+```
+vixy/
+├── AGENT.md                              # ← Core guide (stays in root)
+├── DIARY.md                              # ← Development log (stays in root)
+├── README.md                             # ← Project docs (stays in root)
+├── BLOG.md                               # ← Blog posts (stays in root)
+├── INTEGRATION_TESTS.md                  # ← Integration testing guide (stays in root)
+├── agent/                                # ← Session artifacts folder
+│   └── websocket-reconnection-fix/      # ← Example session
+│       ├── README.md                    # Session summary
+│       ├── WEBSOCKET-RECONNECTION-FIX.md
+│       └── TESTING-IMPROVEMENTS.md
+└── src/                                  # ← Source code
+```
+
+### Benefits
+
+1. **Clean Root Directory**: Project essentials remain visible
+2. **Organized History**: Each AI session is self-contained
+3. **Easy Reference**: Find all artifacts from a specific fix/feature
+4. **No Clutter**: Session-specific docs don't pollute the root
+
+### When Starting a New Session
+
+1. Create folder: `agent/<descriptive-session-name>/`
+2. Add session README.md explaining the goal
+3. Place all analysis, fixes, and documentation in that folder
+4. Update DIARY.md with references to the session folder
+5. Keep root clean!
+
+---

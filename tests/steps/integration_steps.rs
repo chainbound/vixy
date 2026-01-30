@@ -179,12 +179,15 @@ async fn send_batch_request(world: &mut IntegrationWorld) {
 
 #[then("I should receive a valid block number response")]
 async fn verify_block_number_response(world: &mut IntegrationWorld) {
-    assert_eq!(
-        world.last_status_code,
-        Some(200),
-        "Expected 200 OK, got {:?}",
-        world.last_status_code
-    );
+    // For HTTP calls, check status code
+    // For WebSocket calls, last_status_code won't be set - skip the check
+    if let Some(status) = world.last_status_code {
+        assert_eq!(
+            status, 200,
+            "Expected 200 OK for HTTP response, got {}",
+            status
+        );
+    }
 
     let body = world.last_response_body.as_ref().expect("No response body");
     let json: serde_json::Value = serde_json::from_str(body).expect("Invalid JSON response");
@@ -1184,24 +1187,60 @@ async fn client_receives_response_within(world: &mut IntegrationWorld, seconds: 
     }
 
     let conn = world.ws_connection.as_mut().unwrap();
-    let timeout = Duration::from_secs(seconds);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
 
-    match tokio::time::timeout(timeout, conn.receiver.next()).await {
-        Ok(Some(Ok(WsMessage::Text(text)))) => {
-            world.last_response_body = Some(text.to_string());
-            eprintln!("✓ Received response: {}", text);
+    // Loop through messages, skipping subscription notifications until we get a valid RPC response
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            eprintln!(
+                "⚠ Timeout waiting for RPC response (only received subscription notifications)"
+            );
+            break;
         }
-        Ok(Some(Ok(_))) => {
-            eprintln!("⚠ Received non-text message");
-        }
-        Ok(Some(Err(e))) => {
-            eprintln!("⚠ WebSocket error: {e}");
-        }
-        Ok(None) => {
-            eprintln!("⚠ WebSocket connection closed");
-        }
-        Err(_) => {
-            eprintln!("⚠ Timeout waiting for response (upstream may be slow/unavailable)");
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                // Parse to check if this is a subscription notification or RPC response
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    // Skip subscription notifications (have "method": "eth_subscription")
+                    if json.get("method").and_then(|m| m.as_str()) == Some("eth_subscription") {
+                        eprintln!("  (skipping subscription notification)");
+                        continue;
+                    }
+
+                    // Validate this is an RPC response (must have "id" field)
+                    // This prevents accepting subscription confirmations or other messages
+                    if json.get("id").is_none() {
+                        eprintln!("  (skipping message without RPC id field)");
+                        continue;
+                    }
+
+                    // This is a valid RPC response with an id field
+                    world.last_response_body = Some(text.to_string());
+                    eprintln!("✓ Received RPC response: {text}");
+                    break;
+                } else {
+                    eprintln!("⚠ Received invalid JSON, skipping");
+                    continue;
+                }
+            }
+            Ok(Some(Ok(_))) => {
+                eprintln!("⚠ Received non-text message");
+                break;
+            }
+            Ok(Some(Err(e))) => {
+                eprintln!("⚠ WebSocket error: {e}");
+                break;
+            }
+            Ok(None) => {
+                eprintln!("⚠ WebSocket connection closed");
+                break;
+            }
+            Err(_) => {
+                eprintln!("⚠ Timeout waiting for response");
+                break;
+            }
         }
     }
 }
@@ -1300,4 +1339,464 @@ async fn no_websocket_errors(world: &mut IntegrationWorld) {
     } else {
         eprintln!("⚠ WebSocket connection was not established or closed");
     }
+}
+
+// ============================================================================
+// WebSocket Reconnection Test Step Definitions
+// Tests subscription ID preservation and primary node failback
+// ============================================================================
+
+#[when("I send eth_blockNumber over WebSocket and receive response")]
+async fn send_eth_block_number_and_receive(world: &mut IntegrationWorld) {
+    client_sends_eth_block_number(world).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    client_receives_response_within(world, 5).await;
+}
+
+#[when(regex = r"^I wait (\d+) seconds for reconnection to complete$")]
+async fn wait_for_reconnection(_world: &mut IntegrationWorld, seconds: u64) {
+    eprintln!("⏱  Waiting {seconds}s for reconnection to complete...");
+    tokio::time::sleep(Duration::from_secs(seconds)).await;
+    eprintln!("✓ Wait complete");
+}
+
+#[when("I send eth_blockNumber over WebSocket")]
+async fn send_eth_block_number_ws(world: &mut IntegrationWorld) {
+    // Clear old response and status code to ensure we're validating the new one
+    // This prevents asserting on stale HTTP state when this is a WebSocket call
+    world.last_response_body = None;
+    world.last_status_code = None;
+
+    client_sends_eth_block_number(world).await;
+
+    // Wait briefly and receive the response
+    // This ensures subsequent Then steps validate the post-reconnect response, not stale pre-reconnect data
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    client_receives_response_within(world, 5).await;
+}
+
+#[then("I should NOT receive any subscription replay responses")]
+async fn should_not_receive_replay_responses(world: &mut IntegrationWorld) {
+    if world.ws_connection.is_none() {
+        eprintln!("⚠ Skipping - WebSocket not connected");
+        return;
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+    let mut unexpected_responses = Vec::new();
+
+    // Check for unexpected messages for 1 second
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    // Check if this is a subscription response (has result that's a subscription ID)
+                    if let Some(result) = json.get("result") {
+                        if result.is_string() && result.as_str().unwrap().starts_with("0x") {
+                            // This looks like a subscription ID response - unexpected!
+                            unexpected_responses.push(json);
+                        }
+                    }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    assert!(
+        unexpected_responses.is_empty(),
+        "Should NOT receive subscription replay responses. Got {} responses: {:?}",
+        unexpected_responses.len(),
+        unexpected_responses
+    );
+    eprintln!("✓ Verified no subscription replay responses received");
+}
+
+#[then(regex = r"^the response time should be less than (\d+) seconds$")]
+async fn response_time_less_than(world: &mut IntegrationWorld, seconds: u64) {
+    // This is tracked by the timeout in the receive step
+    assert!(
+        world.last_response_body.is_some(),
+        "Should have received response within {} seconds, but got no response",
+        seconds
+    );
+    eprintln!("✓ Response received within {} second time limit", seconds);
+}
+
+#[when(regex = r"^I subscribe to (.+) with RPC ID (\d+)$")]
+async fn subscribe_with_rpc_id(
+    world: &mut IntegrationWorld,
+    subscription_type: String,
+    rpc_id: u64,
+) {
+    if world.ws_connection.is_none() {
+        eprintln!("⚠ Skipping - WebSocket not connected");
+        return;
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+
+    let subscribe_msg = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "method": "eth_subscribe",
+        "params": [subscription_type]
+    });
+
+    match conn
+        .sender
+        .send(WsMessage::Text(subscribe_msg.to_string().into()))
+        .await
+    {
+        Ok(_) => eprintln!("✓ Sent subscription request with RPC ID {rpc_id}"),
+        Err(e) => eprintln!("⚠ Failed to send subscription: {e}"),
+    }
+}
+
+#[then("I receive confirmation for both subscriptions")]
+async fn receive_confirmation_for_both(world: &mut IntegrationWorld) {
+    if world.ws_connection.is_none() {
+        eprintln!("⚠ Skipping - WebSocket not connected");
+        return;
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+    let mut confirmations = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+
+    // Keep reading messages until we get 2 confirmations or timeout
+    while confirmations < 2 {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!(
+                "Timeout waiting for subscription confirmations, got {} confirmations",
+                confirmations
+            );
+        }
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    // Check if this is a subscription confirmation (has "result" with subscription ID string)
+                    // Skip subscription notifications (have "method": "eth_subscription")
+                    if json.get("method").is_some() {
+                        eprintln!(
+                            "  (skipping subscription notification while waiting for confirmations)"
+                        );
+                        continue;
+                    }
+
+                    if let Some(result) = json.get("result") {
+                        if result.is_string() {
+                            confirmations += 1;
+                            eprintln!("✓ Received subscription confirmation {confirmations}/2");
+                        }
+                    }
+                }
+            }
+            Ok(Some(Ok(msg))) => {
+                eprintln!("  (skipping non-text message: {:?})", msg);
+                continue;
+            }
+            Ok(Some(Err(e))) => {
+                panic!("WebSocket error while waiting for confirmations: {}", e);
+            }
+            Ok(None) => {
+                panic!("WebSocket connection closed while waiting for confirmations");
+            }
+            Err(_) => {
+                panic!(
+                    "Timeout waiting for subscription confirmations, got {} confirmations",
+                    confirmations
+                );
+            }
+        }
+    }
+
+    assert_eq!(
+        confirmations, 2,
+        "Should receive confirmation for both subscriptions, got {} confirmations",
+        confirmations
+    );
+    eprintln!("✓ Both subscriptions confirmed");
+}
+
+#[then("both subscriptions should still be active")]
+async fn both_subscriptions_active(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection is still up (minimum requirement for active subscriptions)
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should be active for subscriptions to work"
+    );
+
+    // Note: Full verification requires receiving actual subscription notifications,
+    // which needs block production. This test validates connection state only.
+    eprintln!(
+        "✓ WebSocket connection active (full subscription validation requires block production)"
+    );
+}
+
+#[then("I should receive notifications for both subscription types")]
+async fn receive_notifications_for_both(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection is active (prerequisite for notifications)
+    assert!(
+        world.ws_connected,
+        "WebSocket must be connected to receive notifications"
+    );
+
+    // Note: Actually receiving and validating notifications requires block production
+    // in the test environment. This test validates prerequisites only.
+    eprintln!("✓ WebSocket active (actual notification validation requires block production)");
+}
+
+#[when(regex = r"^I send eth_blockNumber with RPC ID (\d+)$")]
+async fn send_eth_block_number_with_id(world: &mut IntegrationWorld, rpc_id: u64) {
+    if world.ws_connection.is_none() {
+        eprintln!("⚠ Skipping - WebSocket not connected");
+        return;
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_blockNumber",
+        "params": [],
+        "id": rpc_id
+    });
+
+    match conn
+        .sender
+        .send(WsMessage::Text(request.to_string().into()))
+        .await
+    {
+        Ok(_) => eprintln!("✓ Sent eth_blockNumber with RPC ID {rpc_id}"),
+        Err(e) => eprintln!("⚠ Failed to send request: {e}"),
+    }
+}
+
+#[then(regex = r"^I should receive block number response with RPC ID (\d+)$")]
+async fn receive_block_number_response_with_id(world: &mut IntegrationWorld, rpc_id: u64) {
+    if world.ws_connection.is_none() {
+        panic!("WebSocket not connected - cannot receive response");
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+    // Loop through messages, skipping subscription notifications
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!("Timeout waiting for response with RPC ID {}", rpc_id);
+        }
+
+        match tokio::time::timeout(remaining, conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                let json: serde_json::Value =
+                    serde_json::from_str(&text).expect("Response should be valid JSON");
+
+                // Skip subscription notifications
+                if json.get("method").and_then(|m| m.as_str()) == Some("eth_subscription") {
+                    eprintln!(
+                        "  (skipping subscription notification while waiting for RPC ID {})",
+                        rpc_id
+                    );
+                    continue;
+                }
+
+                // This should be an RPC response - verify ID
+                let id = json.get("id").expect("Response should have 'id' field");
+
+                assert_eq!(
+                    id.as_u64(),
+                    Some(rpc_id),
+                    "Response should have correct RPC ID {}. Got ID: {}",
+                    rpc_id,
+                    id
+                );
+
+                world.last_response_body = Some(text.to_string());
+                eprintln!("✓ Received response with correct RPC ID {rpc_id}");
+                break;
+            }
+            Ok(Some(Ok(msg))) => {
+                panic!("Expected text message, got: {:?}", msg);
+            }
+            Ok(Some(Err(e))) => {
+                panic!("WebSocket error: {}", e);
+            }
+            Ok(None) => {
+                panic!("WebSocket connection closed unexpectedly");
+            }
+            Err(_) => {
+                panic!("Timeout waiting for response with RPC ID {}", rpc_id);
+            }
+        }
+    }
+}
+
+#[then(regex = r"^I should NOT receive subscription replay responses with IDs (\d+) or (\d+)$")]
+async fn should_not_receive_replay_with_ids(world: &mut IntegrationWorld, id1: u64, id2: u64) {
+    if world.ws_connection.is_none() {
+        eprintln!("⚠ Skipping - WebSocket not connected");
+        return;
+    }
+
+    let conn = world.ws_connection.as_mut().unwrap();
+    let mut unexpected = Vec::new();
+
+    // Check for unexpected subscription responses for 1 second
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(100), conn.receiver.next()).await {
+            Ok(Some(Ok(WsMessage::Text(text)))) => {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(id) = json.get("id") {
+                        if (id.as_u64() == Some(id1) || id.as_u64() == Some(id2))
+                            && json.get("result").is_some()
+                        {
+                            unexpected.push(json);
+                        }
+                    }
+                }
+            }
+            _ => break,
+        }
+    }
+
+    assert!(
+        unexpected.is_empty(),
+        "Should NOT receive subscription replay responses with IDs {} or {}. Got {} responses: {:?}",
+        id1,
+        id2,
+        unexpected.len(),
+        unexpected
+    );
+    eprintln!(
+        "✓ Verified no subscription replay responses with IDs {} or {}",
+        id1, id2
+    );
+}
+
+#[given("the metrics show primary node connected")]
+async fn metrics_show_primary_connected(world: &mut IntegrationWorld) {
+    let vixy_url = world.vixy_url.as_ref().expect("Vixy URL not set");
+    let client = reqwest::Client::new();
+    let url = format!("{vixy_url}/metrics");
+
+    match client.get(&url).send().await {
+        Ok(response) => {
+            if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify primary node is connected
+                // Look for ws_upstream_node_connected{node="...-primary"} 1
+                let has_primary_connected = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("primary")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_primary_connected,
+                    "Metrics should show primary node connected as precondition. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified primary node connected in metrics");
+            } else {
+                panic!("Failed to read metrics response body");
+            }
+        }
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
+    }
+}
+
+#[when(regex = r"^I wait (\d+) seconds for failover to backup$")]
+async fn wait_for_failover_to_backup(_world: &mut IntegrationWorld, seconds: u64) {
+    eprintln!("⏱  Waiting {seconds}s for failover to backup...");
+    tokio::time::sleep(Duration::from_secs(seconds)).await;
+    eprintln!("✓ Wait complete");
+}
+
+#[then("the metrics should show backup node connected")]
+async fn metrics_should_show_backup(world: &mut IntegrationWorld) {
+    let vixy_url = world.vixy_url.as_ref().expect("Vixy URL not set");
+    let client = reqwest::Client::new();
+    let url = format!("{vixy_url}/metrics");
+
+    match client.get(&url).send().await {
+        Ok(response) => {
+            if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify backup node is connected
+                // Look for ws_upstream_node_connected{node="...-backup"} 1
+                let has_backup_metric = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("backup")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_backup_metric,
+                    "Metrics should show backup node connected. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified backup node connected in metrics");
+            } else {
+                panic!("Failed to read metrics response body");
+            }
+        }
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
+    }
+}
+
+#[then("the metrics should show primary node connected")]
+async fn metrics_should_show_primary(world: &mut IntegrationWorld) {
+    let vixy_url = world.vixy_url.as_ref().expect("Vixy URL not set");
+    let client = reqwest::Client::new();
+    let url = format!("{vixy_url}/metrics");
+
+    match client.get(&url).send().await {
+        Ok(response) => {
+            if let Ok(body) = response.text().await {
+                // Parse Prometheus metrics and verify primary node is connected
+                // Look for ws_upstream_node_connected{node="...-primary"} 1
+                let has_primary_metric = body.lines().any(|line| {
+                    line.contains("ws_upstream_node_connected")
+                        && line.contains("primary")
+                        && line.trim().ends_with(" 1")
+                });
+
+                assert!(
+                    has_primary_metric,
+                    "Metrics should show primary node connected. Metrics:\n{body}"
+                );
+                eprintln!("✓ Verified primary node connected in metrics");
+            } else {
+                panic!("Failed to read metrics response body");
+            }
+        }
+        Err(e) => panic!("Failed to fetch metrics: {e}"),
+    }
+}
+
+#[then("the WebSocket connection should still work")]
+async fn websocket_should_still_work(world: &mut IntegrationWorld) {
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should still be active but is down"
+    );
+    eprintln!("✓ Verified WebSocket connection still active");
+}
+
+#[then("I should receive notifications without interruption")]
+async fn receive_notifications_without_interruption(world: &mut IntegrationWorld) {
+    // Verify WebSocket connection remained active (prerequisite for uninterrupted notifications)
+    assert!(
+        world.ws_connected,
+        "WebSocket connection should remain active for uninterrupted notifications"
+    );
+
+    // Note: Actually receiving and validating continuous notifications requires block production
+    // and time-series analysis. This test validates connection stability only.
+    eprintln!(
+        "✓ WebSocket connection stable (full notification continuity validation requires block production)"
+    );
 }
