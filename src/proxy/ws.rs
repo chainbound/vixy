@@ -564,7 +564,10 @@ async fn handle_client_message_internal(
                 if let Some(m) = method {
                     debug!(method = m, direction = "client->upstream", "WS request");
                 } else {
-                    debug!(direction = "client->upstream", "WS request (unknown method)");
+                    debug!(
+                        direction = "client->upstream",
+                        "WS request (unknown method)"
+                    );
                 }
 
                 if method == Some("eth_subscribe") {
