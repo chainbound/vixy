@@ -4,6 +4,7 @@
 
 use eyre::{Result, WrapErr, eyre};
 use serde::Deserialize;
+use std::collections::HashSet;
 
 /// Configuration error type
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +35,8 @@ pub struct Global {
     pub max_retries: u32,
     /// Number of consecutive health check failures before marking node as unhealthy
     pub health_check_max_failures: u32,
+    /// Maximum request body size in bytes (default: unlimited)
+    pub max_body_size: usize,
 }
 
 /// Metrics configuration settings
@@ -65,6 +68,7 @@ impl Default for Global {
             proxy_timeout_ms: 30000,
             max_retries: 2,
             health_check_max_failures: 3,
+            max_body_size: usize::MAX,
         }
     }
 }
@@ -184,6 +188,36 @@ impl Config {
         for node in &self.cl {
             node.validate()
                 .wrap_err_with(|| format!("invalid CL node '{}'", node.name))?;
+        }
+
+        // Validate unique node names (used for health check result matching)
+        let mut names = HashSet::new();
+        for node in &self.el.primary {
+            if !names.insert(&node.name) {
+                return Err(ConfigError::ValidationFailed(format!(
+                    "duplicate node name '{}'",
+                    node.name
+                ))
+                .into());
+            }
+        }
+        for node in &self.el.backup {
+            if !names.insert(&node.name) {
+                return Err(ConfigError::ValidationFailed(format!(
+                    "duplicate node name '{}'",
+                    node.name
+                ))
+                .into());
+            }
+        }
+        for node in &self.cl {
+            if !names.insert(&node.name) {
+                return Err(ConfigError::ValidationFailed(format!(
+                    "duplicate node name '{}'",
+                    node.name
+                ))
+                .into());
+            }
         }
 
         Ok(())

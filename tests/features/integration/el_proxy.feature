@@ -63,3 +63,45 @@ Feature: EL Proxy Integration Tests
     When the primary EL node is stopped
     And I wait 6 seconds for health detection
     Then subscription events should use the same subscription ID
+
+  @integration @el @websocket @reconnection @critical
+  Scenario: Regular JSON-RPC requests work after WebSocket reconnection (Issue #2)
+    Given all Kurtosis services are running
+    When I connect to the EL WebSocket endpoint
+    And I subscribe to newHeads
+    And I send eth_blockNumber over WebSocket and receive response
+    When the primary EL node is stopped
+    And I wait 6 seconds for reconnection to complete
+    When I send eth_blockNumber over WebSocket
+    Then I should receive a valid block number response
+    And I should NOT receive any subscription replay responses
+    And the response time should be less than 2 seconds
+
+  @integration @el @websocket @reconnection @critical
+  Scenario: Multiple subscriptions maintained after reconnection (Issue #2)
+    Given all Kurtosis services are running
+    When I connect to the EL WebSocket endpoint
+    And I subscribe to newHeads with RPC ID 100
+    And I subscribe to newPendingTransactions with RPC ID 101
+    And I receive confirmation for both subscriptions
+    When the primary EL node is stopped
+    And I wait 6 seconds for reconnection to complete
+    Then both subscriptions should still be active
+    And I should receive notifications for both subscription types
+    When I send eth_blockNumber with RPC ID 200
+    Then I should receive block number response with RPC ID 200
+    And I should NOT receive subscription replay responses with IDs 100 or 101
+
+  @integration @el @websocket @reconnection @primary
+  Scenario: WebSocket switches back to primary when it recovers (Issue #5)
+    Given all Kurtosis services are running
+    And the metrics show primary node connected
+    When I connect to the EL WebSocket endpoint
+    And the primary EL node is stopped
+    And I wait 6 seconds for failover to backup
+    Then the metrics should show backup node connected
+    When the primary EL node is restarted
+    And I wait 6 seconds for health detection
+    Then the metrics should show primary node connected
+    And the WebSocket connection should still work
+    And I should receive notifications without interruption

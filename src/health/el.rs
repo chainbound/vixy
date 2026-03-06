@@ -47,7 +47,11 @@ pub fn parse_hex_block_number(hex: &str) -> Result<u64> {
 
 /// Check an EL node's current block number via JSON-RPC
 pub async fn check_el_node(url: &str) -> Result<u64> {
-    let client = reqwest::Client::new();
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .wrap_err("failed to build HTTP client")?;
 
     let request = JsonRpcRequest {
         jsonrpc: "2.0",

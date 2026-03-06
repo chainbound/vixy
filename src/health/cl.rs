@@ -29,7 +29,11 @@ struct BeaconHeaderMessage {
 
 /// Check if the CL node's health endpoint returns 200
 pub async fn check_cl_health(url: &str) -> Result<bool> {
-    let client = reqwest::Client::new();
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .wrap_err("failed to build HTTP client")?;
 
     let health_url = format!("{}/eth/v1/node/health", url.trim_end_matches('/'));
 
@@ -41,7 +45,11 @@ pub async fn check_cl_health(url: &str) -> Result<bool> {
 
 /// Get the current slot from the CL node's beacon headers endpoint
 pub async fn check_cl_slot(url: &str) -> Result<u64> {
-    let client = reqwest::Client::new();
+    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .wrap_err("failed to build HTTP client")?;
 
     let headers_url = format!("{}/eth/v1/beacon/headers/head", url.trim_end_matches('/'));
 
