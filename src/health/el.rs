@@ -98,7 +98,11 @@ pub fn calculate_el_health(
     // Calculate lag (how far behind the node is from chain head)
     node.lag = chain_head.saturating_sub(node.block_number);
 
-    // Determine if this check passed (check succeeded AND lag is within threshold)
+    // Determine if this check passed (check succeeded AND lag is within threshold).
+    // NOTE: newHeads-subscription freshness is deliberately NOT part of is_healthy —
+    // it is a separate, WebSocket-only signal (see state::ElNodeState::subscription_healthy
+    // and proxy::selection::select_el_ws_node) so a stalled subscription never diverts
+    // HTTP traffic or flips the failover flag.
     let check_passed = node.check_ok && node.lag <= max_lag;
 
     if check_passed {
@@ -236,6 +240,9 @@ mod tests {
             is_healthy: false,
             lag: 0,
             consecutive_failures: 0,
+            sub_block_number: block_number,
+            sub_last_head_at: None,
+            subscription_healthy: true,
         }
     }
 
@@ -376,6 +383,22 @@ mod tests {
             "Consecutive failures should reset on success"
         );
         assert!(node.is_healthy, "Node should be healthy after recovery");
+    }
+
+    #[test]
+    fn test_subscription_staleness_does_not_affect_is_healthy() {
+        // A stalled newHeads subscription must NOT make is_healthy false: subscription
+        // freshness is a separate, WS-only signal. HTTP health depends only on the poll.
+        let mut node = make_el_node("test", 1000, true);
+        node.subscription_healthy = false; // subscription stale...
+        let chain_head = 1000;
+
+        calculate_el_health(&mut node, chain_head, 5, 3);
+
+        assert!(
+            node.is_healthy,
+            "is_healthy must reflect HTTP poll only, independent of subscription freshness"
+        );
     }
 
     // =========================================================================

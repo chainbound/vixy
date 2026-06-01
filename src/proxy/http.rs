@@ -275,6 +275,11 @@ pub struct ElNodeStatus {
     pub lag: u64,
     pub check_ok: bool,
     pub is_healthy: bool,
+    /// Latest block seen on vixy's own newHeads probe subscription to this node.
+    pub sub_block_number: u64,
+    /// Whether that subscription is currently fresh (WS-relay routing signal only;
+    /// does not affect `is_healthy`/HTTP routing).
+    pub subscription_healthy: bool,
 }
 
 /// CL node status for JSON response
@@ -319,6 +324,8 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> Json<StatusRe
                 lag: n.lag,
                 check_ok: n.check_ok,
                 is_healthy: n.is_healthy,
+                sub_block_number: n.sub_block_number,
+                subscription_healthy: n.subscription_healthy,
             })
             .collect()
     };
@@ -375,6 +382,8 @@ mod tests {
             max_retries: 2,
             health_check_max_failures: 3,
             max_body_size: usize::MAX,
+            subscription_health_enabled: true,
+            subscription_stall_timeout_ms: 30000,
             http_client: reqwest::Client::new(),
         })
     }
@@ -390,6 +399,9 @@ mod tests {
             is_healthy,
             lag: 0,
             consecutive_failures: 0,
+            sub_block_number: 1000,
+            sub_last_head_at: None,
+            subscription_healthy: true,
         }
     }
 

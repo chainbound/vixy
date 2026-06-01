@@ -77,6 +77,13 @@ async fn main() -> eyre::Result<()> {
 
     info!(interval_ms = monitor_interval, "Health monitor started");
 
+    // Start the EL newHeads subscription liveness probes. These detect upstreams whose
+    // newHeads subscription has silently stalled (serving a frozen head) even though
+    // HTTP polling still reports them healthy, and drive them subscription-unhealthy so
+    // the WS relay fails over (HTTP routing is unaffected). This fans out one background
+    // task per node and returns; no-op when gating is disabled in config.
+    vixy::health::subscription::run_subscription_probes(state.clone()).await;
+
     // Initialize metrics if enabled (triggers lazy static initialization)
     if config.metrics.enabled {
         let _ = &*vixy::metrics::METRICS;

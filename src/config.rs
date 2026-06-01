@@ -37,6 +37,14 @@ pub struct Global {
     pub health_check_max_failures: u32,
     /// Maximum request body size in bytes (default: unlimited)
     pub max_body_size: usize,
+    /// Whether to mark an EL node unhealthy when its `newHeads` subscription stalls
+    /// (stops advancing) even though HTTP polling still succeeds. Detects upstreams
+    /// that serve a stale head over the subscription while otherwise looking healthy.
+    pub subscription_health_enabled: bool,
+    /// Time in milliseconds without a new head on vixy's own `newHeads` probe
+    /// subscription before the probe drops the connection and reconnects to
+    /// re-establish a fresh subscription.
+    pub subscription_stall_timeout_ms: u64,
 }
 
 /// Metrics configuration settings
@@ -69,6 +77,8 @@ impl Default for Global {
             max_retries: 2,
             health_check_max_failures: 3,
             max_body_size: usize::MAX,
+            subscription_health_enabled: true,
+            subscription_stall_timeout_ms: 30000,
         }
     }
 }
@@ -177,6 +187,16 @@ impl Config {
     /// Validate the entire configuration
     fn validate(&self) -> Result<()> {
         self.el.validate().wrap_err("invalid EL configuration")?;
+
+        if self.global.subscription_health_enabled && self.global.subscription_stall_timeout_ms == 0
+        {
+            return Err(ConfigError::ValidationFailed(
+                "subscription_stall_timeout_ms must be greater than 0 when \
+                 subscription_health_enabled is true"
+                    .to_string(),
+            )
+            .into());
+        }
 
         if self.cl.is_empty() {
             return Err(ConfigError::ValidationFailed(

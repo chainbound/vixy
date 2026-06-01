@@ -175,7 +175,7 @@ async fn is_node_healthy(state: &AppState, node_name: &str) -> bool {
 async fn select_healthy_node(state: &AppState) -> Option<(String, String)> {
     let failover_active = state.el_failover_active.load(Ordering::SeqCst);
     let el_nodes = state.el_nodes.read().await;
-    selection::select_el_node(&el_nodes, failover_active)
+    selection::select_el_ws_node(&el_nodes, failover_active)
         .map(|n| (n.name.clone(), n.ws_url.clone()))
 }
 
@@ -247,8 +247,8 @@ pub async fn el_ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgr
     let (ws_url, node_name) = {
         let el_nodes = state.el_nodes.read().await;
 
-        // Select a healthy node
-        match selection::select_el_node(&el_nodes, failover_active) {
+        // Select a healthy node whose newHeads subscription is also fresh
+        match selection::select_el_ws_node(&el_nodes, failover_active) {
             Some(n) => (n.ws_url.clone(), n.name.clone()),
             None => {
                 warn!("No healthy EL node available for WebSocket");
@@ -943,6 +943,8 @@ mod tests {
             max_retries: 2,
             health_check_max_failures: 3,
             max_body_size: usize::MAX,
+            subscription_health_enabled: true,
+            subscription_stall_timeout_ms: 30000,
             http_client: reqwest::Client::new(),
         })
     }
@@ -958,6 +960,9 @@ mod tests {
             is_healthy,
             lag: 0,
             consecutive_failures: 0,
+            sub_block_number: 1000,
+            sub_last_head_at: None,
+            subscription_healthy: true,
         }
     }
 
