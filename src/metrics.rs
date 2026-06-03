@@ -31,6 +31,10 @@ pub struct VixyMetrics {
     #[metric(rename = "el_node_healthy", labels = ["node", "tier"])]
     el_healthy: Gauge,
 
+    /// EL node newHeads subscription liveness (1=keeping up, 0=stalled)
+    #[metric(rename = "el_node_subscription_healthy", labels = ["node", "tier"])]
+    el_subscription_healthy: Gauge,
+
     /// EL failover active status (1=active, 0=inactive)
     #[metric(rename = "el_failover_active")]
     el_failover_active: Gauge,
@@ -151,6 +155,13 @@ impl VixyMetrics {
     pub fn set_el_healthy(node: &str, tier: &str, healthy: bool) {
         METRICS
             .el_healthy(node, tier)
+            .set(if healthy { 1u64 } else { 0u64 });
+    }
+
+    /// Set EL node newHeads subscription liveness (1 = keeping up, 0 = stalled)
+    pub fn set_el_subscription_healthy(node: &str, tier: &str, healthy: bool) {
+        METRICS
+            .el_subscription_healthy(node, tier)
             .set(if healthy { 1u64 } else { 0u64 });
     }
 

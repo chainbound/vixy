@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 /// State for an EL (Execution Layer) node
@@ -28,6 +29,19 @@ pub struct ElNodeState {
     pub lag: u64,
     /// Number of consecutive health check failures
     pub consecutive_failures: u32,
+    /// Latest block number observed on vixy's own `newHeads` probe subscription to this
+    /// node (informational; surfaced in `/status` and metrics). 0 until the first head.
+    pub sub_block_number: u64,
+    /// When the probe last received a `newHeads` notification from this node. `None`
+    /// until the first head arrives. Freshness is "a head within
+    /// `subscription_stall_timeout`"; a probe that has never delivered a head leaves
+    /// this `None` and therefore cannot, on its own, mark a node unhealthy.
+    pub sub_last_head_at: Option<Instant>,
+    /// Whether the node's `newHeads` subscription is currently fresh. Computed each
+    /// monitor cycle from `sub_last_head_at`. Consulted ONLY by WebSocket relay
+    /// selection — deliberately NOT folded into `is_healthy`, so a stalled subscription
+    /// never diverts HTTP traffic or flips the failover flag. Defaults to true.
+    pub subscription_healthy: bool,
 }
 
 impl ElNodeState {
@@ -43,6 +57,9 @@ impl ElNodeState {
             is_healthy: false, // Start unhealthy until health check passes
             lag: 0,
             consecutive_failures: 0,
+            sub_block_number: 0,
+            sub_last_head_at: None,
+            subscription_healthy: true, // Assume fresh until the probe proves otherwise
         }
     }
 }
@@ -105,6 +122,10 @@ pub struct AppState {
     pub health_check_max_failures: u32,
     /// Maximum request body size in bytes
     pub max_body_size: usize,
+    /// Whether subscription-staleness health gating is enabled
+    pub subscription_health_enabled: bool,
+    /// Probe `newHeads` stall timeout in milliseconds (before the probe reconnects)
+    pub subscription_stall_timeout_ms: u64,
     /// Shared HTTP client for proxy requests (reuses connections)
     pub http_client: reqwest::Client,
 }
@@ -147,6 +168,8 @@ impl AppState {
             max_retries: config.global.max_retries,
             health_check_max_failures: config.global.health_check_max_failures,
             max_body_size: config.global.max_body_size,
+            subscription_health_enabled: config.global.subscription_health_enabled,
+            subscription_stall_timeout_ms: config.global.subscription_stall_timeout_ms,
             http_client,
         }
     }

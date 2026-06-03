@@ -22,6 +22,37 @@ pub fn select_el_node(nodes: &[ElNodeState], failover_active: bool) -> Option<&E
     None
 }
 
+/// Select an EL node for the WebSocket relay, where a stalled `newHeads` subscription
+/// means clients would be served a frozen head.
+///
+/// Prefers, in order:
+/// 1. a healthy primary whose subscription is also fresh,
+/// 2. any healthy node (primary or backup) whose subscription is fresh — a primary that
+///    is HTTP-healthy but subscription-stale cannot serve WS, so a fresh backup is
+///    preferred regardless of the HTTP failover flag,
+/// 3. as a last resort, the plain health-based selection ([`select_el_node`]), so WS is
+///    never *worse* off than HTTP during a total subscription outage.
+pub fn select_el_ws_node(nodes: &[ElNodeState], failover_active: bool) -> Option<&ElNodeState> {
+    // 1. Healthy + fresh primary.
+    if let Some(n) = nodes
+        .iter()
+        .find(|n| n.is_primary && n.is_healthy && n.subscription_healthy)
+    {
+        return Some(n);
+    }
+
+    // 2. Any healthy + fresh node (backups included, independent of failover_active).
+    if let Some(n) = nodes
+        .iter()
+        .find(|n| n.is_healthy && n.subscription_healthy)
+    {
+        return Some(n);
+    }
+
+    // 3. Fall back to plain health-based selection (may be subscription-stale).
+    select_el_node(nodes, failover_active)
+}
+
 /// Select a healthy CL node
 ///
 /// Returns the first healthy CL node found.
@@ -45,6 +76,9 @@ mod tests {
             is_healthy,
             lag: 0,
             consecutive_failures: 0,
+            sub_block_number: 1000,
+            sub_last_head_at: None,
+            subscription_healthy: true,
         }
     }
 
@@ -108,6 +142,78 @@ mod tests {
         assert!(
             selected.unwrap().is_primary,
             "Should prefer primary over backup even when failover active"
+        );
+    }
+
+    // =========================================================================
+    // WebSocket EL node selection tests (subscription-aware)
+    // =========================================================================
+
+    #[test]
+    fn test_select_el_ws_prefers_fresh_primary() {
+        let mut nodes = vec![
+            make_el_node("primary-1", true, true),
+            make_el_node("primary-2", true, true),
+        ];
+        nodes[0].subscription_healthy = false; // stale sub
+        nodes[1].subscription_healthy = true; // fresh
+
+        let selected = select_el_ws_node(&nodes, false);
+
+        assert_eq!(
+            selected.unwrap().name,
+            "primary-2",
+            "WS selection should prefer a healthy primary whose subscription is fresh"
+        );
+    }
+
+    #[test]
+    fn test_select_el_ws_uses_fresh_backup_when_primary_sub_stale() {
+        // Primary is HTTP-healthy but subscription-stale; a fresh backup exists. Even
+        // with failover INACTIVE (HTTP primary is healthy), WS must avoid the stale
+        // primary and use the fresh backup — it cannot serve fresh heads.
+        let mut nodes = vec![
+            make_el_node("primary-1", true, true),
+            make_el_node("backup-1", false, true),
+        ];
+        nodes[0].subscription_healthy = false;
+        nodes[1].subscription_healthy = true;
+
+        let selected = select_el_ws_node(&nodes, false);
+
+        assert_eq!(
+            selected.unwrap().name,
+            "backup-1",
+            "WS selection should use a fresh backup when the only primary is subscription-stale"
+        );
+    }
+
+    #[test]
+    fn test_select_el_ws_falls_back_to_health_when_none_fresh() {
+        // No node has a fresh subscription → fall back to plain health-based selection
+        // (so WS is never worse off than HTTP during a total subscription outage).
+        let mut nodes = vec![
+            make_el_node("primary-1", true, true),
+            make_el_node("backup-1", false, true),
+        ];
+        nodes[0].subscription_healthy = false;
+        nodes[1].subscription_healthy = false;
+
+        let selected = select_el_ws_node(&nodes, false);
+
+        assert_eq!(
+            selected.unwrap().name,
+            "primary-1",
+            "WS selection should fall back to the healthy primary when no node is fresh"
+        );
+    }
+
+    #[test]
+    fn test_select_el_ws_none_when_no_healthy_node() {
+        let nodes = vec![make_el_node("primary-1", true, false)];
+        assert!(
+            select_el_ws_node(&nodes, false).is_none(),
+            "WS selection should return None when no node is healthy"
         );
     }
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 use futures_util::future;
 use tracing::{debug, info, warn};
 
-use crate::health::{cl, el};
+use crate::health::{cl, el, subscription};
 use crate::metrics::VixyMetrics;
 use crate::state::AppState;
 
@@ -97,8 +97,19 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     let mut el_nodes = state.el_nodes.write().await;
     let mut any_primary_healthy = false;
     let mut healthy_count = 0u64;
+    let sub_stall_timeout = Duration::from_millis(state.subscription_stall_timeout_ms);
 
     for node in el_nodes.iter_mut() {
+        // Recompute newHeads-subscription freshness (time since last head). This is a
+        // SEPARATE, WebSocket-only signal: it is consulted by select_el_ws_node, NOT
+        // folded into is_healthy, so a stalled subscription never affects HTTP routing
+        // or the failover flag.
+        node.subscription_healthy = subscription::is_subscription_fresh(
+            node.sub_last_head_at,
+            sub_stall_timeout,
+            state.subscription_health_enabled,
+        );
+
         el::calculate_el_health(
             node,
             chain_head,
@@ -119,6 +130,11 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
         VixyMetrics::set_el_block_number(&node.name, tier, node.block_number);
         VixyMetrics::set_el_lag(&node.name, tier, node.lag);
         VixyMetrics::set_el_healthy(&node.name, tier, node.is_healthy);
+        // Only emit subscription liveness once the probe is actually tracking this node,
+        // so a disabled feature or a not-yet-connected probe isn't reported as "fresh".
+        if state.subscription_health_enabled && node.sub_last_head_at.is_some() {
+            VixyMetrics::set_el_subscription_healthy(&node.name, tier, node.subscription_healthy);
+        }
 
         debug!(
             node = %node.name,
@@ -126,6 +142,8 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
             block_number = node.block_number,
             check_ok = node.check_ok,
             lag = node.lag,
+            sub_block_number = node.sub_block_number,
+            subscription_healthy = node.subscription_healthy,
             consecutive_failures = node.consecutive_failures,
             is_healthy = node.is_healthy,
             "EL node health calculated"
