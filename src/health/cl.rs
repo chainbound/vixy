@@ -28,33 +28,27 @@ struct BeaconHeaderMessage {
 }
 
 /// Check if the CL node's health endpoint returns 200
-pub async fn check_cl_health(url: &str) -> Result<bool> {
-    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .wrap_err("failed to build HTTP client")?;
-
+pub async fn check_cl_health(client: &reqwest::Client, url: &str) -> bool {
     let health_url = format!("{}/eth/v1/node/health", url.trim_end_matches('/'));
 
-    match client.get(&health_url).send().await {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(_) => Ok(false), // Connection failure means unhealthy
+    match client
+        .get(&health_url)
+        .timeout(super::PROBE_TIMEOUT)
+        .send()
+        .await
+    {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false, // Connection failure means unhealthy
     }
 }
 
 /// Get the current slot from the CL node's beacon headers endpoint
-pub async fn check_cl_slot(url: &str) -> Result<u64> {
-    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .wrap_err("failed to build HTTP client")?;
-
+pub async fn check_cl_slot(client: &reqwest::Client, url: &str) -> Result<u64> {
     let headers_url = format!("{}/eth/v1/beacon/headers/head", url.trim_end_matches('/'));
 
     let response = client
         .get(&headers_url)
+        .timeout(super::PROBE_TIMEOUT)
         .send()
         .await
         .wrap_err("failed to send request to CL node")?;
@@ -73,14 +67,12 @@ pub async fn check_cl_slot(url: &str) -> Result<u64> {
 }
 
 /// Check both health and slot for a CL node
-pub async fn check_cl_node(url: &str) -> Result<(bool, u64)> {
-    // Check health endpoint
-    let health_ok = check_cl_health(url).await?;
+pub async fn check_cl_node(client: &reqwest::Client, url: &str) -> Result<(bool, u64)> {
+    // Run both probes concurrently: sequentially, an unreachable node costs two
+    // full timeouts per cycle, delaying the whole monitor pass.
+    let (health_ok, slot) = tokio::join!(check_cl_health(client, url), check_cl_slot(client, url));
 
-    // Get current slot
-    let slot = check_cl_slot(url).await?;
-
-    Ok((health_ok, slot))
+    Ok((health_ok, slot?))
 }
 
 /// Find the highest slot across all CL nodes (the chain head)
@@ -137,9 +129,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result = check_cl_health(&mock_server.uri())
-            .await
-            .expect("Should check health");
+        let result = check_cl_health(&reqwest::Client::new(), &mock_server.uri()).await;
 
         assert!(result, "Should return true on 200 response");
     }
@@ -154,9 +144,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result = check_cl_health(&mock_server.uri())
-            .await
-            .expect("Should check health");
+        let result = check_cl_health(&reqwest::Client::new(), &mock_server.uri()).await;
 
         assert!(!result, "Should return false on 503 response");
     }
@@ -164,9 +152,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_cl_health_returns_false_on_connection_failure() {
         // Use an invalid URL that will fail to connect
-        let result = check_cl_health("http://localhost:99999")
-            .await
-            .expect("Should handle connection failure");
+        let result = check_cl_health(&reqwest::Client::new(), "http://localhost:99999").await;
 
         assert!(!result, "Should return false on connection failure");
     }
@@ -200,7 +186,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let slot = check_cl_slot(&mock_server.uri())
+        let slot = check_cl_slot(&reqwest::Client::new(), &mock_server.uri())
             .await
             .expect("Should parse slot");
 
@@ -217,7 +203,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result = check_cl_slot(&mock_server.uri()).await;
+        let result = check_cl_slot(&reqwest::Client::new(), &mock_server.uri()).await;
         assert!(result.is_err(), "Should fail on invalid JSON");
     }
 

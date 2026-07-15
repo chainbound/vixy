@@ -9,7 +9,6 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
@@ -173,10 +172,8 @@ async fn is_node_healthy(state: &AppState, node_name: &str) -> bool {
 
 /// Select a new healthy node, returns (node_name, ws_url)
 async fn select_healthy_node(state: &AppState) -> Option<(String, String)> {
-    let failover_active = state.el_failover_active.load(Ordering::SeqCst);
     let el_nodes = state.el_nodes.read().await;
-    selection::select_el_ws_node(&el_nodes, failover_active)
-        .map(|n| (n.name.clone(), n.ws_url.clone()))
+    selection::select_el_ws_node(&el_nodes).map(|n| (n.name.clone(), n.ws_url.clone()))
 }
 
 /// Health monitor task that watches for node health changes
@@ -240,15 +237,13 @@ async fn health_monitor(
 
 /// Handle EL WebSocket upgrade requests (GET /el/ws)
 pub async fn el_ws_handler(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> Response {
-    // Read the failover flag
-    let failover_active = state.el_failover_active.load(Ordering::SeqCst);
-
     // Get a read lock on EL nodes and extract what we need
     let (ws_url, node_name) = {
         let el_nodes = state.el_nodes.read().await;
 
         // Select a healthy node whose newHeads subscription is also fresh
-        match selection::select_el_ws_node(&el_nodes, failover_active) {
+        // (fails over to backups when no primary qualifies)
+        match selection::select_el_ws_node(&el_nodes) {
             Some(n) => (n.ws_url.clone(), n.name.clone()),
             None => {
                 warn!("No healthy EL node available for WebSocket");
@@ -981,8 +976,7 @@ mod tests {
 
         // Verify that node selection returns None when no healthy nodes
         let nodes = state.el_nodes.read().await;
-        let failover_active = state.el_failover_active.load(Ordering::SeqCst);
-        let selected = crate::proxy::selection::select_el_node(&nodes, failover_active);
+        let selected = crate::proxy::selection::select_el_node(&nodes);
         assert!(selected.is_none(), "Should not select unhealthy node");
     }
 
@@ -993,8 +987,7 @@ mod tests {
 
         // Verify that node selection returns the healthy node
         let nodes = state.el_nodes.read().await;
-        let failover_active = state.el_failover_active.load(Ordering::SeqCst);
-        let selected = crate::proxy::selection::select_el_node(&nodes, failover_active);
+        let selected = crate::proxy::selection::select_el_node(&nodes);
         assert!(selected.is_some(), "Should select healthy node");
         assert_eq!(selected.unwrap().ws_url, "ws://localhost:8546");
     }

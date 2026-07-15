@@ -23,15 +23,12 @@ pub async fn el_proxy_handler(
 ) -> Response {
     let start = Instant::now();
 
-    // Read the failover flag
-    let failover_active = state.el_failover_active.load(Ordering::SeqCst);
-
     // Get a read lock on EL nodes and extract what we need
     let (target_url, node_name, tier) = {
         let el_nodes = state.el_nodes.read().await;
 
-        // Select a healthy node
-        match selection::select_el_node(&el_nodes, failover_active) {
+        // Select a healthy node (fails over to backups when no primary is healthy)
+        match selection::select_el_node(&el_nodes) {
             Some(n) => {
                 let tier = if n.is_primary { "primary" } else { "backup" };
                 (n.http_url.clone(), n.name.clone(), tier)
@@ -462,6 +459,60 @@ mod tests {
             .unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["result"], "0x10d4f");
+    }
+
+    /// Regression: a healthy backup must serve traffic whenever no primary is
+    /// healthy, even while `el_failover_active` is false — routing must never
+    /// gate on the observability flag.
+    #[tokio::test]
+    async fn test_el_proxy_uses_backup_before_failover_flag_is_set() {
+        let backup_mock = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": "0xbac",
+                "id": 1
+            })))
+            .mount(&backup_mock)
+            .await;
+
+        let unhealthy_primary = make_el_node("geth-1", "http://localhost:1", false);
+        let mut backup = make_el_node("backup-1", &backup_mock.uri(), true);
+        backup.is_primary = false;
+
+        let state = create_test_state(vec![unhealthy_primary, backup], vec![]);
+        assert!(
+            !state.el_failover_active.load(Ordering::SeqCst),
+            "precondition: failover flag not set"
+        );
+
+        let app = Router::new()
+            .route("/el", axum::routing::post(el_proxy_handler))
+            .with_state(state);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/el")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}"#,
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "request must be served by the healthy backup, not refused with 503"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["result"], "0xbac");
     }
 
     #[tokio::test]

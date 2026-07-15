@@ -46,13 +46,7 @@ pub fn parse_hex_block_number(hex: &str) -> Result<u64> {
 }
 
 /// Check an EL node's current block number via JSON-RPC
-pub async fn check_el_node(url: &str) -> Result<u64> {
-    // Use a timeout to prevent health checks from blocking indefinitely if the node is unresponsive
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .wrap_err("failed to build HTTP client")?;
-
+pub async fn check_el_node(client: &reqwest::Client, url: &str) -> Result<u64> {
     let request = JsonRpcRequest {
         jsonrpc: "2.0",
         method: "eth_blockNumber",
@@ -62,6 +56,7 @@ pub async fn check_el_node(url: &str) -> Result<u64> {
 
     let response = client
         .post(url)
+        .timeout(super::PROBE_TIMEOUT)
         .json(&request)
         .send()
         .await
@@ -191,7 +186,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let block_number = check_el_node(&mock_server.uri())
+        let block_number = check_el_node(&reqwest::Client::new(), &mock_server.uri())
             .await
             .expect("Should get block number");
 
@@ -204,7 +199,7 @@ mod tests {
 
         // Don't mount any mock - request will fail
 
-        let result = check_el_node(&mock_server.uri()).await;
+        let result = check_el_node(&reqwest::Client::new(), &mock_server.uri()).await;
         assert!(result.is_err(), "Should fail on timeout/no response");
     }
 
@@ -221,7 +216,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let result = check_el_node(&mock_server.uri()).await;
+        let result = check_el_node(&reqwest::Client::new(), &mock_server.uri()).await;
         assert!(result.is_err(), "Should fail on invalid hex in response");
     }
 

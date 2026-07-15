@@ -16,21 +16,16 @@ use crate::state::AppState;
 /// Run a single health check cycle for all nodes
 ///
 /// This function checks all EL and CL nodes once and updates their state.
+/// The EL and CL passes are independent, so they run concurrently.
 /// Returns true if at least one primary EL node is healthy.
 pub async fn run_health_check_cycle(state: &Arc<AppState>) -> bool {
-    // Check all EL nodes
-    let any_primary_healthy = check_all_el_nodes(state).await;
-
-    // Check all CL nodes
-    check_all_cl_nodes(state).await;
-
-    // Update failover flag
-    update_failover_flag(state, any_primary_healthy);
+    let (any_primary_healthy, ()) =
+        tokio::join!(check_all_el_nodes(state), check_all_cl_nodes(state));
 
     any_primary_healthy
 }
 
-/// Check all EL nodes and update their state
+/// Check all EL nodes, update their state, and refresh the failover flag
 ///
 /// Returns true if at least one primary EL node is healthy.
 pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
@@ -45,9 +40,11 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
             .collect()
     };
 
-    // Check all nodes concurrently without holding any lock
+    // Check all nodes concurrently without holding any lock. Probes ride the
+    // shared proxy client so they exercise the same pool as proxied traffic.
+    let client = &state.http_client;
     let check_results = future::join_all(node_checks.iter().map(|(name, url)| async move {
-        let result = el::check_el_node(url).await;
+        let result = el::check_el_node(client, url).await;
         (name.clone(), result)
     }))
     .await;
@@ -153,6 +150,10 @@ pub async fn check_all_el_nodes(state: &Arc<AppState>) -> bool {
     // Update healthy nodes count metric
     VixyMetrics::set_el_healthy_nodes(healthy_count);
 
+    // The flag is derived from the pass just completed; updating it here keeps
+    // node states and flag moving together as one EL health pass.
+    update_failover_flag(state, any_primary_healthy);
+
     any_primary_healthy
 }
 
@@ -170,8 +171,9 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
     };
 
     // Check all nodes concurrently without holding any lock
+    let client = &state.http_client;
     let check_results = future::join_all(node_checks.iter().map(|(name, url)| async move {
-        let result = cl::check_cl_node(url).await;
+        let result = cl::check_cl_node(client, url).await;
         (name.clone(), result)
     }))
     .await;
@@ -258,6 +260,10 @@ pub async fn check_all_cl_nodes(state: &Arc<AppState>) {
 }
 
 /// Update the failover flag based on primary EL node availability
+///
+/// The flag is observability-only (metrics, /status, transition logs). Node
+/// selection derives failover from live node state and deliberately does not
+/// consult this flag — see [`crate::proxy::selection::select_el_node`].
 pub fn update_failover_flag(state: &Arc<AppState>, any_primary_healthy: bool) {
     let was_failover = state.el_failover_active.load(Ordering::SeqCst);
     let is_failover = !any_primary_healthy;
@@ -601,16 +607,55 @@ health_check_interval_ms = 100
         // Initially failover should be inactive
         assert!(!state.el_failover_active.load(Ordering::SeqCst));
 
-        // Run health check - primary will fail
-        let any_primary_healthy = check_all_el_nodes(&state).await;
-
-        // Update failover flag
-        update_failover_flag(&state, any_primary_healthy);
+        // Run health check - primary will fail; the EL pass refreshes the flag itself
+        check_all_el_nodes(&state).await;
 
         // Failover should now be active since no primary is healthy
         assert!(
             state.el_failover_active.load(Ordering::SeqCst),
             "Failover should be active when no primary nodes are healthy"
+        );
+    }
+
+    // =========================================================================
+    // test_backup_usable_immediately_after_primary_marked_unhealthy
+    // =========================================================================
+
+    /// Regression test for the production 503s ("No healthy EL node available"):
+    /// the moment an EL pass marks the last primary unhealthy, a healthy backup
+    /// must be selectable and the failover flag must already be refreshed — no
+    /// separate cycle step may sit between node state and routing/observability.
+    #[tokio::test]
+    async fn test_backup_usable_immediately_after_primary_marked_unhealthy() {
+        let primary_mock = MockServer::start().await;
+        let backup_mock = MockServer::start().await;
+
+        // Primary: no mock mounted → checks fail. Backup: healthy.
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "result": "0x3e8",
+                "id": 1
+            })))
+            .mount(&backup_mock)
+            .await;
+
+        let config = create_config_with_backup(&[&primary_mock.uri()], &[&backup_mock.uri()], &[]);
+        let state = Arc::new(AppState::new(&config));
+
+        // Run enough EL passes to cross health_check_max_failures (default 3)
+        for _ in 0..state.health_check_max_failures {
+            check_all_el_nodes(&state).await;
+        }
+
+        let el_nodes = state.el_nodes.read().await;
+        assert!(!el_nodes[0].is_healthy, "primary should be unhealthy");
+        let selected = crate::proxy::selection::select_el_node(&el_nodes)
+            .expect("healthy backup must be selectable from live node state");
+        assert_eq!(selected.name, "backup-0");
+        assert!(
+            state.el_failover_active.load(Ordering::SeqCst),
+            "failover flag must be refreshed by the same EL pass"
         );
     }
 
@@ -649,11 +694,8 @@ health_check_interval_ms = 100
         // Set failover as active (simulating previous failure)
         state.el_failover_active.store(true, Ordering::SeqCst);
 
-        // Run health check - primary is now healthy
-        let any_primary_healthy = check_all_el_nodes(&state).await;
-
-        // Update failover flag
-        update_failover_flag(&state, any_primary_healthy);
+        // Run health check - primary is now healthy; the EL pass refreshes the flag itself
+        check_all_el_nodes(&state).await;
 
         // Failover should be cleared since primary is healthy
         assert!(
