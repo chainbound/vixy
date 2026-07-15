@@ -108,7 +108,9 @@ pub struct AppState {
     pub el_chain_head: AtomicU64,
     /// Current CL chain head (highest slot seen)
     pub cl_chain_head: AtomicU64,
-    /// Whether we're in failover mode (using backup EL nodes)
+    /// Whether the last EL health pass found no healthy primary. Observability
+    /// only (metrics, /status, transition logs) — routing derives failover from
+    /// live node state, never from this flag.
     pub el_failover_active: AtomicBool,
     /// Maximum allowed EL lag in blocks
     pub max_el_lag: u64,

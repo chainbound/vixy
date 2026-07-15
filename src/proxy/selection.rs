@@ -4,22 +4,14 @@ use crate::state::{ClNodeState, ElNodeState};
 
 /// Select a healthy EL node, preferring primary nodes over backup
 ///
-/// When failover_active is false, only primary nodes are considered.
-/// When failover_active is true, both primary and backup nodes are considered.
-pub fn select_el_node(nodes: &[ElNodeState], failover_active: bool) -> Option<&ElNodeState> {
-    // First try to find a healthy primary node
-    let primary = nodes.iter().find(|n| n.is_primary && n.is_healthy);
-
-    if primary.is_some() {
-        return primary;
-    }
-
-    // If no healthy primary and failover is active, try backup nodes
-    if failover_active {
-        return nodes.iter().find(|n| !n.is_primary && n.is_healthy);
-    }
-
-    None
+/// Failover derives from live node state: backups are eligible whenever no
+/// healthy primary exists. The `el_failover_active` flag is a per-cycle
+/// observability snapshot and deliberately does not gate routing.
+pub fn select_el_node(nodes: &[ElNodeState]) -> Option<&ElNodeState> {
+    nodes
+        .iter()
+        .find(|n| n.is_primary && n.is_healthy)
+        .or_else(|| nodes.iter().find(|n| !n.is_primary && n.is_healthy))
 }
 
 /// Select an EL node for the WebSocket relay, where a stalled `newHeads` subscription
@@ -29,10 +21,10 @@ pub fn select_el_node(nodes: &[ElNodeState], failover_active: bool) -> Option<&E
 /// 1. a healthy primary whose subscription is also fresh,
 /// 2. any healthy node (primary or backup) whose subscription is fresh — a primary that
 ///    is HTTP-healthy but subscription-stale cannot serve WS, so a fresh backup is
-///    preferred regardless of the HTTP failover flag,
+///    preferred,
 /// 3. as a last resort, the plain health-based selection ([`select_el_node`]), so WS is
 ///    never *worse* off than HTTP during a total subscription outage.
-pub fn select_el_ws_node(nodes: &[ElNodeState], failover_active: bool) -> Option<&ElNodeState> {
+pub fn select_el_ws_node(nodes: &[ElNodeState]) -> Option<&ElNodeState> {
     // 1. Healthy + fresh primary.
     if let Some(n) = nodes
         .iter()
@@ -41,7 +33,7 @@ pub fn select_el_ws_node(nodes: &[ElNodeState], failover_active: bool) -> Option
         return Some(n);
     }
 
-    // 2. Any healthy + fresh node (backups included, independent of failover_active).
+    // 2. Any healthy + fresh node (backups included).
     if let Some(n) = nodes
         .iter()
         .find(|n| n.is_healthy && n.subscription_healthy)
@@ -50,7 +42,7 @@ pub fn select_el_ws_node(nodes: &[ElNodeState], failover_active: bool) -> Option
     }
 
     // 3. Fall back to plain health-based selection (may be subscription-stale).
-    select_el_node(nodes, failover_active)
+    select_el_node(nodes)
 }
 
 /// Select a healthy CL node
@@ -106,7 +98,7 @@ mod tests {
             make_el_node("geth-2", true, true),
         ];
 
-        let selected = select_el_node(&nodes, false);
+        let selected = select_el_node(&nodes);
 
         assert!(selected.is_some(), "Should select a healthy node");
         assert_eq!(selected.unwrap().name, "geth-1");
@@ -119,7 +111,7 @@ mod tests {
             make_el_node("geth-2", true, true),  // healthy
         ];
 
-        let selected = select_el_node(&nodes, false);
+        let selected = select_el_node(&nodes);
 
         assert!(selected.is_some(), "Should find a healthy node");
         assert_eq!(
@@ -136,12 +128,12 @@ mod tests {
             make_el_node("primary-1", true, true), // primary, healthy
         ];
 
-        let selected = select_el_node(&nodes, true); // failover active
+        let selected = select_el_node(&nodes);
 
         assert!(selected.is_some());
         assert!(
             selected.unwrap().is_primary,
-            "Should prefer primary over backup even when failover active"
+            "Should prefer primary over backup when both are healthy"
         );
     }
 
@@ -158,7 +150,7 @@ mod tests {
         nodes[0].subscription_healthy = false; // stale sub
         nodes[1].subscription_healthy = true; // fresh
 
-        let selected = select_el_ws_node(&nodes, false);
+        let selected = select_el_ws_node(&nodes);
 
         assert_eq!(
             selected.unwrap().name,
@@ -179,7 +171,7 @@ mod tests {
         nodes[0].subscription_healthy = false;
         nodes[1].subscription_healthy = true;
 
-        let selected = select_el_ws_node(&nodes, false);
+        let selected = select_el_ws_node(&nodes);
 
         assert_eq!(
             selected.unwrap().name,
@@ -199,7 +191,7 @@ mod tests {
         nodes[0].subscription_healthy = false;
         nodes[1].subscription_healthy = false;
 
-        let selected = select_el_ws_node(&nodes, false);
+        let selected = select_el_ws_node(&nodes);
 
         assert_eq!(
             selected.unwrap().name,
@@ -212,7 +204,7 @@ mod tests {
     fn test_select_el_ws_none_when_no_healthy_node() {
         let nodes = vec![make_el_node("primary-1", true, false)];
         assert!(
-            select_el_ws_node(&nodes, false).is_none(),
+            select_el_ws_node(&nodes).is_none(),
             "WS selection should return None when no node is healthy"
         );
     }
@@ -224,20 +216,14 @@ mod tests {
             make_el_node("backup-1", false, true),  // backup, healthy
         ];
 
-        // Without failover, should return None (no healthy primary)
-        let without_failover = select_el_node(&nodes, false);
+        // Failover is derived from live state: no healthy primary → backup is
+        // selected immediately, without waiting for any external flag.
+        let selected = select_el_node(&nodes);
         assert!(
-            without_failover.is_none(),
-            "Without failover, should not select backup"
+            selected.is_some(),
+            "Backup should be selected as soon as no primary is healthy"
         );
-
-        // With failover, should select backup
-        let with_failover = select_el_node(&nodes, true);
-        assert!(
-            with_failover.is_some(),
-            "With failover, should select backup"
-        );
-        assert_eq!(with_failover.unwrap().name, "backup-1");
+        assert_eq!(selected.unwrap().name, "backup-1");
     }
 
     #[test]
@@ -247,7 +233,7 @@ mod tests {
             make_el_node("backup-1", false, false), // unhealthy
         ];
 
-        let selected = select_el_node(&nodes, true); // even with failover
+        let selected = select_el_node(&nodes);
 
         assert!(
             selected.is_none(),
@@ -259,7 +245,7 @@ mod tests {
     fn test_select_empty_list_returns_none() {
         let nodes: Vec<ElNodeState> = vec![];
 
-        let selected = select_el_node(&nodes, true);
+        let selected = select_el_node(&nodes);
 
         assert!(selected.is_none(), "Empty list should return None");
     }
